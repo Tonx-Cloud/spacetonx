@@ -1,5 +1,7 @@
 // VoiceChat - Sistema de bate-papo de voz via WebRTC + Supabase Realtime
 // Sala única para todos os jogadores logados
+// Usa Supabase Presence para descobrir peers (garante sincronização)
+// e broadcast para sinalização WebRTC (offer/answer/ICE)
 
 const VoiceChat = (() => {
   let supabase = null;
@@ -10,6 +12,7 @@ const VoiceChat = (() => {
   let isMuted = false;
   let myPeerId = '';
   let connectedPeers = new Set();
+  let pendingOffers = new Set(); // evita ofertas duplicadas
 
   const ICE_SERVERS = [
     { urls: 'stun:stun.l.google.com:19302' },
@@ -54,6 +57,27 @@ const VoiceChat = (() => {
     });
   }
 
+  // Retorna todos os peerIds presentes no canal (exceto o próprio)
+  function getPresencePeerIds() {
+    if (!channel) return [];
+    const state = channel.presenceState();
+    const ids = [];
+    for (const key of Object.keys(state)) {
+      for (const entry of state[key]) {
+        if (entry.peerId && entry.peerId !== myPeerId) {
+          ids.push(entry.peerId);
+        }
+      }
+    }
+    return ids;
+  }
+
+  // Decide quem inicia a oferta para evitar duplicação:
+  // o peer com ID lexicograficamente menor cria a offer
+  function shouldInitiate(remotePeerId) {
+    return myPeerId < remotePeerId;
+  }
+
   async function join() {
     if (isActive) return;
 
@@ -61,7 +85,6 @@ const VoiceChat = (() => {
     if (!ok) return;
 
     try {
-      // Solicitar acesso ao microfone
       localStream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
@@ -79,50 +102,62 @@ const VoiceChat = (() => {
     isMuted = false;
     updateVoiceUI();
 
-    // Canal de sinalização via Supabase Realtime
     channel = supabase.channel('voice-room', {
-      config: { broadcast: { self: false } }
+      config: { broadcast: { self: false }, presence: { key: myPeerId } }
     });
 
+    // --- Sinalização WebRTC via Broadcast ---
     channel.on('broadcast', { event: 'voice-signal' }, async (payload) => {
       const data = payload.payload;
       if (!data || data.target !== myPeerId) return;
 
-      switch (data.type) {
-        case 'offer':
-          await handleOffer(data.from, data.sdp);
-          break;
-        case 'answer':
-          await handleAnswer(data.from, data.sdp);
-          break;
-        case 'ice-candidate':
-          await handleIceCandidate(data.from, data.candidate);
-          break;
+      try {
+        switch (data.type) {
+          case 'offer':
+            await handleOffer(data.from, data.sdp);
+            break;
+          case 'answer':
+            await handleAnswer(data.from, data.sdp);
+            break;
+          case 'ice-candidate':
+            await handleIceCandidate(data.from, data.candidate);
+            break;
+        }
+      } catch (e) {
+        console.warn('[Voice] Sinal ignorado:', e);
       }
     });
 
-    channel.on('broadcast', { event: 'voice-presence' }, (payload) => {
-      const data = payload.payload;
-      if (!data) return;
+    // --- Presence: sincroniza quem está na sala ---
+    channel.on('presence', { event: 'sync' }, () => {
+      // sync é chamado sempre que o estado de presença muda.
+      // Conectar a todos os peers que ainda não estamos conectados.
+      const remotePeers = getPresencePeerIds();
+      for (const rId of remotePeers) {
+        if (!peers[rId] && !pendingOffers.has(rId) && shouldInitiate(rId)) {
+          pendingOffers.add(rId);
+          createOffer(rId);
+        }
+      }
+      updatePeerCount();
+    });
 
-      if (data.type === 'join' && data.peerId !== myPeerId) {
-        // Novo peer entrou — criar oferta pra ele
-        createOffer(data.peerId);
-      } else if (data.type === 'leave' && peers[data.peerId]) {
-        removePeer(data.peerId);
+    channel.on('presence', { event: 'leave' }, ({ leftPresences }) => {
+      for (const p of leftPresences) {
+        if (p.peerId && peers[p.peerId]) {
+          removePeer(p.peerId);
+        }
       }
     });
 
-    await channel.subscribe();
-
-    // Anunciar entrada na sala
-    channel.send({
-      type: 'broadcast',
-      event: 'voice-presence',
-      payload: { type: 'join', peerId: myPeerId }
+    // Aguardar confirmação real da inscrição antes de rastrear presença
+    channel.subscribe(async (status) => {
+      if (status === 'SUBSCRIBED') {
+        // Registrar presença — todos os inscritos receberão sync
+        await channel.track({ peerId: myPeerId });
+        updateVoiceStatus('connected', 'Na sala de voz');
+      }
     });
-
-    updateVoiceStatus('connected', 'Na sala de voz');
   }
 
   async function createOffer(remotePeerId) {
@@ -234,6 +269,7 @@ const VoiceChat = (() => {
       peers[peerId].close();
       delete peers[peerId];
     }
+    pendingOffers.delete(peerId);
     const audioEl = document.getElementById('voice-audio-' + peerId);
     if (audioEl) audioEl.remove();
     connectedPeers.delete(peerId);
@@ -243,13 +279,9 @@ const VoiceChat = (() => {
   function leave() {
     if (!isActive) return;
 
-    // Anunciar saída
+    // Remover presença e canal
     if (channel) {
-      channel.send({
-        type: 'broadcast',
-        event: 'voice-presence',
-        payload: { type: 'leave', peerId: myPeerId }
-      });
+      channel.untrack();
       supabase.removeChannel(channel);
       channel = null;
     }
@@ -266,6 +298,7 @@ const VoiceChat = (() => {
     isActive = false;
     isMuted = false;
     connectedPeers.clear();
+    pendingOffers.clear();
     updateVoiceUI();
     updateVoiceStatus('offline', 'Desconectado da voz');
   }
