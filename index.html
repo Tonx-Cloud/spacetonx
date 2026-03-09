@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#ff0044">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="css/style.css">
+  <title>Space Shooter - Ataque Galáctico</title>
+</head>
+<body>
+  <div id="game-container"></div>
+
+  <!-- ===== MENU SANDUÍCHE (HAMBURGER) ===== -->
+  <button id="hamburger-btn" onclick="HamburgerMenu.toggle()" aria-label="Menu">
+    <span class="hamburger-line"></span>
+    <span class="hamburger-line"></span>
+    <span class="hamburger-line"></span>
+  </button>
+
+  <nav id="hamburger-panel" class="menu-hidden">
+    <div class="menu-header">
+      <span>🚀 SPACE SHOOTER</span>
+      <button class="menu-close" onclick="HamburgerMenu.close()">✕</button>
+    </div>
+
+    <div class="menu-items">
+      <!-- Instalar PWA -->
+      <button id="menu-install" class="menu-item" onclick="HamburgerMenu.installPWA()">
+        <span class="menu-item-icon">📲</span>
+        <div class="menu-item-text">
+          <span class="menu-item-label">Instalar App</span>
+          <span class="menu-item-desc">Instalar no celular/PC</span>
+        </div>
+      </button>
+
+      <!-- Chat de Texto -->
+      <button class="menu-item" onclick="HamburgerMenu.openChat()">
+        <span class="menu-item-icon">💬</span>
+        <div class="menu-item-text">
+          <span class="menu-item-label">Chat de Texto</span>
+          <span class="menu-item-desc">Conversar com outros jogadores</span>
+        </div>
+      </button>
+
+      <!-- Chat de Voz -->
+      <button id="voice-toggle-btn" class="menu-item" onclick="HamburgerMenu.toggleVoice()">
+        <span class="menu-item-icon">🎙️</span>
+        <div class="menu-item-text">
+          <span class="menu-item-label">Entrar na Voz</span>
+          <span class="menu-item-desc">Sala de voz com todos os jogadores</span>
+        </div>
+      </button>
+
+      <div class="menu-divider"></div>
+
+      <!-- Tela Cheia -->
+      <button class="menu-item" onclick="HamburgerMenu.toggleFullscreen()">
+        <span class="menu-item-icon">⛶</span>
+        <div class="menu-item-text">
+          <span class="menu-item-label">Tela Cheia</span>
+          <span class="menu-item-desc">Imersão total no jogo</span>
+        </div>
+      </button>
+
+      <!-- Som -->
+      <button id="menu-sound" class="menu-item" onclick="HamburgerMenu.toggleSound()">
+        <span class="menu-item-icon">🔊</span>
+        <div class="menu-item-text">
+          <span class="menu-item-label">Som</span>
+          <span class="menu-item-desc">Desativar efeitos sonoros</span>
+        </div>
+      </button>
+
+      <!-- Compartilhar -->
+      <button class="menu-item" onclick="HamburgerMenu.share()">
+        <span class="menu-item-icon">🔗</span>
+        <div class="menu-item-text">
+          <span class="menu-item-label">Compartilhar</span>
+          <span class="menu-item-desc">Enviar link para amigos</span>
+        </div>
+      </button>
+
+      <div class="menu-divider"></div>
+
+      <!-- Sobre -->
+      <button class="menu-item" onclick="HamburgerMenu.showAbout()">
+        <span class="menu-item-icon">ℹ️</span>
+        <div class="menu-item-text">
+          <span class="menu-item-label">Sobre</span>
+          <span class="menu-item-desc">Créditos e versão</span>
+        </div>
+      </button>
+    </div>
+  </nav>
+
+  <!-- ===== INDICADOR DE VOZ (flutuante) ===== -->
+  <div id="voice-indicator" style="display:none;">
+    <div class="voice-pulse"></div>
+    <span id="voice-peer-count">1 na sala</span>
+    <button id="voice-mute-btn" onclick="HamburgerMenu.toggleVoiceMute()" style="display:none;">🎤</button>
+    <span id="voice-status" class="voice-status"></span>
+  </div>
+
+  <!-- ===== CHAT OVERLAY ===== -->
+  <div id="chat-overlay" class="chat-hidden">
+    <div id="chat-header">
+      <span>💬 Chat</span>
+      <button id="chat-toggle-btn" onclick="toggleChat()">✕</button>
+    </div>
+    <div id="chat-messages"></div>
+    <div id="chat-input-area">
+      <input type="text" id="chat-input" placeholder="Digite sua mensagem..." maxlength="200" autocomplete="off">
+      <button id="chat-send" onclick="sendChatMessage()">➤</button>
+    </div>
+  </div>
+  <button id="chat-open-btn" onclick="toggleChat()">💬</button>
+
+  <!-- ===== MODAL SOBRE ===== -->
+  <div id="about-modal" class="modal-overlay">
+    <div class="modal-content">
+      <button class="modal-close" onclick="HamburgerMenu.closeAbout()">✕</button>
+      <h2>🚀 Space Shooter</h2>
+      <h3>Ataque Galáctico</h3>
+      <p>Versão 1.1 — PWA Edition</p>
+      <div class="about-features">
+        <p>🎮 Jogo arcade de naves espacial</p>
+        <p>📱 Instalável como app (PWA)</p>
+        <p>💬 Chat de texto em tempo real</p>
+        <p>🎙️ Bate-papo de voz com amigos</p>
+        <p>🏆 Ondas de dificuldade progressiva</p>
+        <p>👾 Bosses a cada 5 ondas</p>
+      </div>
+      <p class="about-tech">Engine: Phaser 3 • Chat: Supabase Realtime • Voz: WebRTC</p>
+      <p class="about-copy">Feito com 💜 — 2026</p>
+    </div>
+  </div>
+
+  <!-- ===== TOAST ===== -->
+  <div id="menu-toast"></div>
+
+  <!-- Phaser 3 via CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+
+  <!-- Game Scripts -->
+  <script src="js/scenes/BootScene.js"></script>
+  <script src="js/scenes/MenuScene.js"></script>
+  <script src="js/scenes/GameScene.js"></script>
+  <script src="js/scenes/GameOverScene.js"></script>
+  <script src="js/chat.js"></script>
+  <script src="js/voice.js"></script>
+  <script src="js/menu.js"></script>
+  <script src="js/game.js"></script>
+
+  <script>
+    // Registrar Service Worker
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
+  </script>
+</body>
+</html>

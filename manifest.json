@@ -1,0 +1,22 @@
+{
+  "name": "Space Shooter - Ataque Galáctico",
+  "short_name": "SpaceShooter",
+  "description": "Jogo de nave espacial estilo arcade com chat multiplayer",
+  "start_url": "/index.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#000011",
+  "theme_color": "#ff0044",
+  "icons": [
+    {
+      "src": "assets/icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "assets/icon-192.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml"
+    }
+  ]
+}
