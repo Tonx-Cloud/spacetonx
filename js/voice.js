@@ -1,24 +1,41 @@
 // VoiceChat - Chat de voz via WebRTC
-// Reutiliza o canal Supabase Realtime do ChatSystem (mesmo canal = mesma sala)
-// Sinalização WebRTC via broadcast no canal do chat
-// Descoberta de peers via Presence do canal do chat
+// Reutiliza o canal Supabase Realtime do ChatSystem
+// Sinalização WebRTC via broadcast + descoberta de peers via Presence
 
 const VoiceChat = (() => {
   let localStream = null;
-  let peers = {};          // peerId -> RTCPeerConnection
+  let peers = {};
   let isActive = false;
   let isMuted = false;
   let myPeerId = '';
   let connectedPeers = new Set();
   let pendingOffers = new Set();
-  let signalHandler = null;
-  let presenceSyncHandler = null;
-  let presenceLeaveHandler = null;
   let chatChannel = null;
+  let audioContext = null;
+  let iceCandidateBuffer = {};
+  let remoteDescSet = {};
 
   const ICE_SERVERS = [
     { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' }
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
+    { urls: 'stun:stun4.l.google.com:19302' },
+    {
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    }
   ];
 
   function generatePeerId() {
@@ -29,7 +46,6 @@ const VoiceChat = (() => {
     return ChatSystem.channel;
   }
 
-  // Aguarda o canal do chat ficar disponível (até 10s)
   function waitForChannel() {
     return new Promise((resolve) => {
       if (getChannel()) return resolve(getChannel());
@@ -42,7 +58,6 @@ const VoiceChat = (() => {
     });
   }
 
-  // Retorna todos os peerIds de voz presentes no canal
   function getVoicePeerIds() {
     const ch = getChannel();
     if (!ch) return [];
@@ -64,10 +79,8 @@ const VoiceChat = (() => {
 
   async function join() {
     if (isActive) return;
-
     updateVoiceStatus('connecting', 'Conectando...');
 
-    // Garante que o chat esteja inicializado
     if (!ChatSystem.channel) { ChatSystem.init(); }
     const ch = await waitForChannel();
     if (!ch) {
@@ -81,8 +94,18 @@ const VoiceChat = (() => {
         video: false
       });
     } catch (err) {
+      console.error('[Voice] Mic error:', err);
       updateVoiceStatus('offline', 'Microfone negado');
       return;
+    }
+
+    // Desbloquear áudio no mobile (dentro do gesto do usuário)
+    try {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      await audioContext.resume();
+      console.log('[Voice] AudioContext desbloqueado, state:', audioContext.state);
+    } catch (e) {
+      console.warn('[Voice] AudioContext falhou:', e);
     }
 
     myPeerId = generatePeerId();
@@ -92,23 +115,25 @@ const VoiceChat = (() => {
     syncGlobals();
     updateVoiceUI();
 
-    // Escutar sinais WebRTC via broadcast no canal do chat
     chatChannel.on('broadcast', { event: 'voice-signal' }, handleSignal);
-
-    // Escutar Presence sync para detectar peers de voz
     chatChannel.on('presence', { event: 'sync' }, handlePresenceSync);
     chatChannel.on('presence', { event: 'leave' }, handlePresenceLeave);
 
-    // Atualizar presença com voicePeerId via ChatSystem
-    ChatSystem.updatePresence();
+    await ChatSystem.updatePresence();
 
     updateVoiceStatus('connected', 'Na sala de voz');
     console.log('[Voice] Entrou na sala, peerId:', myPeerId);
+
+    // Retry: verificar peers após 2s caso sync tenha sido perdido
+    setTimeout(() => { if (isActive) handlePresenceSync(); }, 2000);
+    setTimeout(() => { if (isActive) handlePresenceSync(); }, 5000);
   }
 
   async function handleSignal(payload) {
     const data = payload.payload;
     if (!data || data.target !== myPeerId) return;
+
+    console.log('[Voice] Sinal recebido:', data.type, 'de', data.from);
 
     try {
       switch (data.type) {
@@ -123,15 +148,17 @@ const VoiceChat = (() => {
           break;
       }
     } catch (e) {
-      console.warn('[Voice] Sinal ignorado:', e);
+      console.warn('[Voice] Erro ao processar sinal:', data.type, e);
     }
   }
 
   function handlePresenceSync() {
     if (!isActive) return;
     const remotePeers = getVoicePeerIds();
+    console.log('[Voice] Presence sync — peers de voz:', remotePeers.length, remotePeers);
     for (const rId of remotePeers) {
       if (!peers[rId] && !pendingOffers.has(rId) && shouldInitiate(rId)) {
+        console.log('[Voice] Iniciando oferta para', rId);
         pendingOffers.add(rId);
         createOffer(rId);
       }
@@ -152,6 +179,8 @@ const VoiceChat = (() => {
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
 
+    console.log('[Voice] Oferta criada para', remotePeerId);
+
     chatChannel.send({
       type: 'broadcast',
       event: 'voice-signal',
@@ -160,10 +189,18 @@ const VoiceChat = (() => {
   }
 
   async function handleOffer(remotePeerId, sdp) {
+    console.log('[Voice] Processando oferta de', remotePeerId);
     const pc = createPeerConnection(remotePeerId);
     await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+    remoteDescSet[remotePeerId] = true;
+
+    // Flush ICE candidates que chegaram antes do SDP
+    await flushIceCandidates(remotePeerId);
+
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
+
+    console.log('[Voice] Resposta enviada para', remotePeerId);
 
     chatChannel.send({
       type: 'broadcast',
@@ -175,19 +212,52 @@ const VoiceChat = (() => {
   async function handleAnswer(remotePeerId, sdp) {
     const pc = peers[remotePeerId];
     if (!pc) return;
+    console.log('[Voice] Processando resposta de', remotePeerId);
     await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+    remoteDescSet[remotePeerId] = true;
+
+    await flushIceCandidates(remotePeerId);
   }
 
   async function handleIceCandidate(remotePeerId, candidate) {
     const pc = peers[remotePeerId];
     if (!pc) return;
+
+    if (!remoteDescSet[remotePeerId]) {
+      // Buffering: SDP ainda não chegou
+      if (!iceCandidateBuffer[remotePeerId]) iceCandidateBuffer[remotePeerId] = [];
+      iceCandidateBuffer[remotePeerId].push(candidate);
+      console.log('[Voice] ICE candidate bufferizado para', remotePeerId);
+      return;
+    }
+
     await pc.addIceCandidate(new RTCIceCandidate(candidate));
+  }
+
+  async function flushIceCandidates(remotePeerId) {
+    const buffer = iceCandidateBuffer[remotePeerId];
+    if (!buffer || buffer.length === 0) return;
+    const pc = peers[remotePeerId];
+    if (!pc) return;
+
+    console.log('[Voice] Flushing', buffer.length, 'ICE candidates para', remotePeerId);
+    for (const c of buffer) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(c));
+      } catch (e) {
+        console.warn('[Voice] ICE candidate falhou:', e);
+      }
+    }
+    iceCandidateBuffer[remotePeerId] = [];
   }
 
   function createPeerConnection(remotePeerId) {
     if (peers[remotePeerId]) {
       peers[remotePeerId].close();
     }
+
+    iceCandidateBuffer[remotePeerId] = [];
+    remoteDescSet[remotePeerId] = false;
 
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
     peers[remotePeerId] = pc;
@@ -207,28 +277,85 @@ const VoiceChat = (() => {
     };
 
     pc.ontrack = (event) => {
+      console.log('[Voice] Track recebida de', remotePeerId);
+
+      // Rota 1: AudioContext (funciona no mobile)
+      if (audioContext && audioContext.state === 'running') {
+        try {
+          const stream = new MediaStream([event.track]);
+          const source = audioContext.createMediaStreamSource(stream);
+          source.connect(audioContext.destination);
+          console.log('[Voice] Áudio roteado via AudioContext');
+        } catch (e) {
+          console.warn('[Voice] AudioContext routing falhou:', e);
+        }
+      }
+
+      // Rota 2: Audio element (fallback)
       const audioId = 'voice-audio-' + remotePeerId;
       const old = document.getElementById(audioId);
       if (old) old.remove();
 
-      const audio = new Audio();
+      const audio = document.createElement('audio');
       audio.srcObject = event.streams[0];
       audio.id = audioId;
-      audio.play().catch(() => {});
+      audio.autoplay = true;
+      audio.playsInline = true;
+      audio.setAttribute('playsinline', '');
+      audio.play().catch(e => console.warn('[Voice] Audio.play() bloqueado:', e));
       document.body.appendChild(audio);
 
       connectedPeers.add(remotePeerId);
       updatePeerCount();
-      console.log('[Voice] Áudio conectado com', remotePeerId);
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      const state = pc.iceConnectionState;
+      console.log('[Voice] ICE state com', remotePeerId, ':', state);
+
+      if (state === 'failed') {
+        console.log('[Voice] ICE failed, tentando restart...');
+        if (shouldInitiate(remotePeerId)) {
+          recreateOffer(remotePeerId);
+        }
+      }
+      if (state === 'disconnected') {
+        setTimeout(() => {
+          if (peers[remotePeerId] && peers[remotePeerId].iceConnectionState === 'disconnected') {
+            removePeer(remotePeerId);
+          }
+        }, 5000);
+      }
+      if (state === 'connected') {
+        console.log('[Voice] ✅ Conectado com áudio a', remotePeerId);
+      }
     };
 
     pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+      console.log('[Voice] Connection state com', remotePeerId, ':', pc.connectionState);
+      if (pc.connectionState === 'failed') {
         removePeer(remotePeerId);
       }
     };
 
     return pc;
+  }
+
+  async function recreateOffer(remotePeerId) {
+    const pc = peers[remotePeerId];
+    if (!pc) return;
+    try {
+      const offer = await pc.createOffer({ iceRestart: true });
+      await pc.setLocalDescription(offer);
+      chatChannel.send({
+        type: 'broadcast',
+        event: 'voice-signal',
+        payload: { type: 'offer', from: myPeerId, target: remotePeerId, sdp: pc.localDescription }
+      });
+      console.log('[Voice] ICE restart offer enviada para', remotePeerId);
+    } catch (e) {
+      console.warn('[Voice] ICE restart falhou:', e);
+    }
   }
 
   function removePeer(peerId) {
@@ -237,6 +364,8 @@ const VoiceChat = (() => {
       delete peers[peerId];
     }
     pendingOffers.delete(peerId);
+    delete iceCandidateBuffer[peerId];
+    delete remoteDescSet[peerId];
     const audioEl = document.getElementById('voice-audio-' + peerId);
     if (audioEl) audioEl.remove();
     connectedPeers.delete(peerId);
@@ -246,17 +375,21 @@ const VoiceChat = (() => {
   function leave() {
     if (!isActive) return;
 
-    // Fechar todas as conexões WebRTC
     Object.keys(peers).forEach(removePeer);
 
-    // Parar microfone
     if (localStream) {
       localStream.getTracks().forEach(t => t.stop());
       localStream = null;
     }
 
+    if (audioContext) {
+      audioContext.close().catch(() => {});
+      audioContext = null;
+    }
+
     isActive = false;
     isMuted = false;
+    myPeerId = '';
     connectedPeers.clear();
     pendingOffers.clear();
     chatChannel = null;

@@ -206,9 +206,13 @@ const ChatSystem = (() => {
   }
 
   // Atualizar presença (chamada quando voz muda, nome muda, etc)
-  function updatePresence() {
+  async function updatePresence() {
     if (channel) {
-      channel.track(getPresencePayload());
+      try {
+        await channel.track(getPresencePayload());
+      } catch (e) {
+        console.warn('[Chat] Presence track falhou:', e);
+      }
     }
   }
 
