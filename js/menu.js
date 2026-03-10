@@ -171,6 +171,13 @@ const HamburgerMenu = (() => {
     VoiceChat.toggleMute();
   }
 
+  // ===== JOGADORES ONLINE =====
+  function toggleOnline() {
+    close();
+    const panel = document.getElementById('online-panel');
+    if (panel) panel.classList.toggle('online-hidden');
+  }
+
   // ===== SOBRE =====
   function showAbout() {
     close();
@@ -208,6 +215,7 @@ const HamburgerMenu = (() => {
     openChat,
     toggleVoice,
     toggleVoiceMute,
+    toggleOnline,
     showAbout,
     closeAbout,
     get isSoundEnabled() { return soundEnabled; }

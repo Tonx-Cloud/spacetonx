@@ -1,5 +1,5 @@
 // Chat System - Usa Supabase Realtime para chat entre jogadores
-// Se Supabase não estiver configurado, funciona em modo local
+// Presence para lista de online + sinalização de voz
 
 const ChatSystem = (() => {
   let supabase = null;
@@ -7,8 +7,10 @@ const ChatSystem = (() => {
   let username = '';
   let isOpen = false;
   let initialized = false;
+  let presenceKey = '';
+  let onlinePlayers = [];  // [{username, voiceActive, isMuted, isMe}]
+  let onPresenceChange = null; // callback externo
 
-  // Gera nome aleatório se não tiver
   function generateUsername() {
     const adjectives = ['Astro', 'Cosmic', 'Star', 'Nova', 'Blaze', 'Shadow', 'Neon', 'Turbo', 'Hyper', 'Pixel'];
     const nouns = ['Pilot', 'Hunter', 'Ace', 'Wing', 'Storm', 'Fury', 'Ghost', 'Blade', 'Hawk', 'Fox'];
@@ -22,14 +24,12 @@ const ChatSystem = (() => {
     if (initialized) return;
     initialized = true;
 
-    // Recuperar ou gerar username
     username = localStorage.getItem('space_chat_user') || generateUsername();
     localStorage.setItem('space_chat_user', username);
+    presenceKey = 'u_' + Math.random().toString(36).substring(2, 8);
 
-    // Tentar conectar ao Supabase
     connectSupabase();
 
-    // Event listeners do chat
     const input = document.getElementById('chat-input');
     if (input) {
       input.addEventListener('keydown', (e) => {
@@ -37,7 +37,6 @@ const ChatSystem = (() => {
           sendChatMessage();
           e.preventDefault();
         }
-        // Impedir que teclas do chat afetem o jogo
         e.stopPropagation();
       });
     }
@@ -64,9 +63,8 @@ const ChatSystem = (() => {
 
       supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-      // Criar canal de chat com Presence habilitado
       channel = supabase.channel('space-shooter-chat', {
-        config: { broadcast: { self: true }, presence: { key: 'user_' + Math.random().toString(36).substring(2, 8) } }
+        config: { broadcast: { self: true }, presence: { key: presenceKey } }
       });
 
       channel.on('broadcast', { event: 'message' }, (payload) => {
@@ -83,14 +81,32 @@ const ChatSystem = (() => {
         }
       });
 
-      await channel.subscribe();
-      addSystemMessage('Conectado ao chat online!');
+      // Presence: atualizar lista de jogadores online
+      channel.on('presence', { event: 'sync' }, () => {
+        refreshOnlinePlayers();
+      });
 
-      // Anunciar entrada
-      channel.send({
-        type: 'broadcast',
-        event: 'player_event',
-        payload: { text: `${username} entrou no jogo!` }
+      channel.on('presence', { event: 'join' }, ({ newPresences }) => {
+        for (const p of newPresences) {
+          if (p.username && p.presenceKey !== presenceKey) {
+            addSystemMessage(`${p.username} entrou`);
+          }
+        }
+      });
+
+      channel.on('presence', { event: 'leave' }, ({ leftPresences }) => {
+        for (const p of leftPresences) {
+          if (p.username && p.presenceKey !== presenceKey) {
+            addSystemMessage(`${p.username} saiu`);
+          }
+        }
+      });
+
+      channel.subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          await channel.track(getPresencePayload());
+          addSystemMessage('Conectado ao chat online!');
+        }
       });
 
     } catch (err) {
@@ -178,6 +194,120 @@ const ChatSystem = (() => {
     addSystemMessage(eventText);
   }
 
+  // Gera payload de presença com estado atual
+  function getPresencePayload() {
+    return {
+      username: username,
+      presenceKey: presenceKey,
+      voicePeerId: window._voicePeerId || null,
+      voiceActive: !!window._voiceActive,
+      voiceMuted: !!window._voiceMuted
+    };
+  }
+
+  // Atualizar presença (chamada quando voz muda, nome muda, etc)
+  function updatePresence() {
+    if (channel) {
+      channel.track(getPresencePayload());
+    }
+  }
+
+  // Lê estado de presença e monta lista de jogadores online
+  function refreshOnlinePlayers() {
+    if (!channel) return;
+    const state = channel.presenceState();
+    const players = [];
+    for (const key of Object.keys(state)) {
+      for (const entry of state[key]) {
+        if (entry.username) {
+          players.push({
+            username: entry.username,
+            voiceActive: !!entry.voiceActive,
+            voiceMuted: !!entry.voiceMuted,
+            voicePeerId: entry.voicePeerId || null,
+            isMe: entry.presenceKey === presenceKey
+          });
+        }
+      }
+    }
+    onlinePlayers = players;
+    renderOnlineList();
+    if (onPresenceChange) onPresenceChange(players);
+  }
+
+  function renderOnlineList() {
+    const list = document.getElementById('online-list');
+    if (!list) return;
+    const countEl = document.getElementById('online-count');
+    if (countEl) countEl.textContent = onlinePlayers.length;
+
+    list.innerHTML = '';
+    for (const p of onlinePlayers) {
+      const li = document.createElement('div');
+      li.className = 'online-player' + (p.isMe ? ' online-player-me' : '');
+
+      // Ícone de status de voz
+      let voiceIcon = '';
+      if (p.voiceActive) {
+        voiceIcon = p.voiceMuted ? '<span class="op-mic muted" title="Mutado">🔇</span>'
+                                 : '<span class="op-mic active" title="No mic">🎤</span>';
+      }
+
+      // Se for eu, botão de mic toggle + editar nome
+      if (p.isMe) {
+        li.innerHTML = `
+          <span class="op-name">${p.username} <small>(você)</small></span>
+          <span class="op-actions">
+            ${window._voiceActive ? '<button class="op-mic-btn" onclick="VoiceChat.toggleMute()" title="Mutar/Desmutar">' + (window._voiceMuted ? '🔇' : '🎤') + '</button>' : ''}
+            <button class="op-edit-btn" onclick="ChatSystem.promptChangeName()" title="Trocar nome">✏️</button>
+          </span>`;
+      } else {
+        li.innerHTML = `<span class="op-name">${p.username}</span>${voiceIcon}`;
+      }
+      list.appendChild(li);
+    }
+  }
+
+  // Trocar nome
+  function promptChangeName() {
+    const modal = document.getElementById('name-modal');
+    const input = document.getElementById('name-input');
+    if (modal && input) {
+      input.value = username;
+      modal.classList.add('modal-visible');
+      setTimeout(() => input.focus(), 100);
+    }
+  }
+
+  function confirmChangeName() {
+    const input = document.getElementById('name-input');
+    if (!input) return;
+    const newName = input.value.trim().substring(0, 20);
+    if (!newName || newName === username) {
+      closeNameModal();
+      return;
+    }
+    const oldName = username;
+    username = newName;
+    localStorage.setItem('space_chat_user', username);
+    addSystemMessage(`Nome alterado para ${username}`);
+    updatePresence();
+
+    if (channel) {
+      channel.send({
+        type: 'broadcast',
+        event: 'player_event',
+        payload: { text: `${oldName} agora é ${username}` }
+      });
+    }
+    closeNameModal();
+  }
+
+  function closeNameModal() {
+    const modal = document.getElementById('name-modal');
+    if (modal) modal.classList.remove('modal-visible');
+  }
+
   function toggle() {
     const overlay = document.getElementById('chat-overlay');
     if (!overlay) return;
@@ -185,12 +315,10 @@ const ChatSystem = (() => {
     isOpen = !isOpen;
     overlay.classList.toggle('chat-hidden', !isOpen);
 
-    // Inicializar na primeira abertura
     if (isOpen && !initialized) {
       init();
     }
 
-    // Focus no input
     if (isOpen) {
       setTimeout(() => {
         const input = document.getElementById('chat-input');
@@ -204,9 +332,16 @@ const ChatSystem = (() => {
     sendMessage,
     toggle,
     notifyGameEvent,
+    promptChangeName,
+    confirmChangeName,
+    closeNameModal,
+    updatePresence,
+    refreshOnlinePlayers,
     get username() { return username; },
     get supabase() { return supabase; },
-    get channel() { return channel; }
+    get channel() { return channel; },
+    get onlinePlayers() { return onlinePlayers; },
+    set onPresenceChange(fn) { onPresenceChange = fn; }
   };
 })();
 

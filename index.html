@@ -36,6 +36,24 @@
         </div>
       </button>
 
+      <!-- Jogadores Online -->
+      <button class="menu-item" onclick="HamburgerMenu.toggleOnline()">
+        <span class="menu-item-icon">👥</span>
+        <div class="menu-item-text">
+          <span class="menu-item-label">Jogadores Online</span>
+          <span class="menu-item-desc">Ver quem está jogando agora</span>
+        </div>
+      </button>
+
+      <!-- Trocar Nome -->
+      <button class="menu-item" onclick="ChatSystem.promptChangeName()">
+        <span class="menu-item-icon">✏️</span>
+        <div class="menu-item-text">
+          <span class="menu-item-label">Trocar Nome</span>
+          <span class="menu-item-desc">Alterar seu nome de jogador</span>
+        </div>
+      </button>
+
       <!-- Chat de Texto -->
       <button class="menu-item" onclick="HamburgerMenu.openChat()">
         <span class="menu-item-icon">💬</span>
@@ -135,6 +153,26 @@
       </div>
       <p class="about-tech">Engine: Phaser 3 • Chat: Supabase Realtime • Voz: WebRTC</p>
       <p class="about-copy">Feito com 💜 — 2026</p>
+    </div>
+  </div>
+
+  <!-- ===== PAINEL JOGADORES ONLINE ===== -->
+  <div id="online-panel" class="online-hidden">
+    <div id="online-header">
+      <span>👥 Online (<span id="online-count">0</span>)</span>
+      <button onclick="document.getElementById('online-panel').classList.add('online-hidden')">✕</button>
+    </div>
+    <div id="online-list"></div>
+  </div>
+
+  <!-- ===== MODAL TROCAR NOME ===== -->
+  <div id="name-modal" class="modal-overlay">
+    <div class="modal-content name-modal-box">
+      <button class="modal-close" onclick="ChatSystem.closeNameModal()">✕</button>
+      <h2>✏️ Trocar Nome</h2>
+      <input type="text" id="name-input" maxlength="20" placeholder="Novo nome..." autocomplete="off"
+             onkeydown="if(event.key==='Enter'){ChatSystem.confirmChangeName();event.preventDefault();}">
+      <button id="name-confirm-btn" onclick="ChatSystem.confirmChangeName()">Confirmar</button>
     </div>
   </div>
 

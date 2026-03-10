@@ -524,6 +524,154 @@ html, body {
 }
 
 /* ================================================================
+   PAINEL JOGADORES ONLINE
+   ================================================================ */
+#online-panel {
+  position: fixed;
+  top: 60px;
+  left: 10px;
+  width: 220px;
+  max-height: 60vh;
+  background: rgba(0, 0, 20, 0.95);
+  border: 1px solid rgba(0, 255, 255, 0.25);
+  border-radius: 12px;
+  z-index: 800;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  backdrop-filter: blur(12px);
+  transition: opacity 0.25s, transform 0.25s;
+}
+
+#online-panel.online-hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-20px);
+}
+
+#online-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background: rgba(0, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(0, 255, 255, 0.15);
+  font-size: 13px;
+  font-weight: 700;
+  color: #00ffff;
+}
+
+#online-header button {
+  background: none;
+  border: none;
+  color: #aaa;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+#online-list {
+  overflow-y: auto;
+  padding: 6px 0;
+  max-height: calc(60vh - 44px);
+}
+
+.online-player {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px;
+  font-size: 13px;
+  color: #d0d0ff;
+}
+
+.online-player-me {
+  background: rgba(0, 255, 255, 0.07);
+  color: #00ffff;
+}
+
+.op-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.op-name small {
+  font-size: 10px;
+  opacity: 0.65;
+}
+
+.op-actions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.op-mic-btn, .op-edit-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  font-size: 14px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+}
+
+.op-mic-btn:hover, .op-edit-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.op-mic.active { color: #00ff66; }
+.op-mic.muted  { color: #ff4466; }
+
+/* ================================================================
+   MODAL TROCAR NOME
+   ================================================================ */
+.name-modal-box {
+  text-align: center;
+}
+
+.name-modal-box h2 {
+  margin-bottom: 16px;
+}
+
+#name-input {
+  width: 80%;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 255, 255, 0.3);
+  background: rgba(0, 0, 30, 0.8);
+  color: #fff;
+  font-size: 15px;
+  outline: none;
+  margin-bottom: 14px;
+}
+
+#name-input:focus {
+  border-color: #00ffff;
+}
+
+#name-confirm-btn {
+  padding: 10px 24px;
+  border-radius: 8px;
+  border: none;
+  background: linear-gradient(135deg, #00ffff, #0088ff);
+  color: #000;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+#name-confirm-btn:hover {
+  opacity: 0.85;
+}
+
+/* ================================================================
    MOBILE ADJUSTMENTS
    ================================================================ */
 @media (max-width: 480px) {
@@ -542,5 +690,10 @@ html, body {
     left: 56px;
     font-size: 11px;
     padding: 4px 10px;
+  }
+
+  #online-panel {
+    width: calc(100% - 20px);
+    left: 10px;
   }
 }

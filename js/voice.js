@@ -89,6 +89,7 @@ const VoiceChat = (() => {
     isActive = true;
     isMuted = false;
     chatChannel = ch;
+    syncGlobals();
     updateVoiceUI();
 
     // Escutar sinais WebRTC via broadcast no canal do chat
@@ -98,8 +99,8 @@ const VoiceChat = (() => {
     chatChannel.on('presence', { event: 'sync' }, handlePresenceSync);
     chatChannel.on('presence', { event: 'leave' }, handlePresenceLeave);
 
-    // Atualizar presença com voicePeerId (o chat já rastreia presença, fazemos re-track)
-    await chatChannel.track({ voicePeerId: myPeerId });
+    // Atualizar presença com voicePeerId via ChatSystem
+    ChatSystem.updatePresence();
 
     updateVoiceStatus('connected', 'Na sala de voz');
     console.log('[Voice] Entrou na sala, peerId:', myPeerId);
@@ -245,11 +246,6 @@ const VoiceChat = (() => {
   function leave() {
     if (!isActive) return;
 
-    // Remover voicePeerId da presença (re-track sem ele)
-    if (chatChannel) {
-      chatChannel.track({});
-    }
-
     // Fechar todas as conexões WebRTC
     Object.keys(peers).forEach(removePeer);
 
@@ -264,6 +260,8 @@ const VoiceChat = (() => {
     connectedPeers.clear();
     pendingOffers.clear();
     chatChannel = null;
+    syncGlobals();
+    ChatSystem.updatePresence();
     updateVoiceUI();
     updateVoiceStatus('offline', 'Desconectado da voz');
   }
@@ -272,11 +270,19 @@ const VoiceChat = (() => {
     if (!isActive || !localStream) return;
     isMuted = !isMuted;
     localStream.getAudioTracks().forEach(track => { track.enabled = !isMuted; });
+    syncGlobals();
+    ChatSystem.updatePresence();
     updateVoiceUI();
   }
 
   function toggle() {
     if (isActive) { leave(); } else { join(); }
+  }
+
+  function syncGlobals() {
+    window._voiceActive = isActive;
+    window._voiceMuted = isMuted;
+    window._voicePeerId = myPeerId || null;
   }
 
   // ===== UI Helpers =====
