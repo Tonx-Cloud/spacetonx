@@ -107,6 +107,10 @@ const ChatSystem = (() => {
         if (status === 'SUBSCRIBED') {
           await channel.track(getPresencePayload());
           addSystemMessage('Conectado ao chat online!');
+          // Auto-join de voz: configura o listener de gesto do usuário
+          if (typeof VoiceChat !== 'undefined' && VoiceChat.setupAutoJoin) {
+            VoiceChat.setupAutoJoin();
+          }
         }
       });
 
