@@ -5,50 +5,94 @@ class BootScene extends Phaser.Scene {
   }
 
   create() {
-    this.generatePlayerShip();
+    this.generatePlayerShips();
     this.generateEnemyShips();
     this.generateBullets();
     this.generatePowerUps();
     this.generateParticles();
     this.generateUI();
+    this.generateCoin();
 
     this.scene.start('Menu');
   }
 
-  // ========== NAVE DO JOGADOR ==========
-  generatePlayerShip() {
+  // ========== NAVES DO JOGADOR (3 modelos) ==========
+  generatePlayerShips() {
+    // --- FALCON (azul, padrão) ---
     const g = this.make.graphics({ add: false });
-
-    // Corpo principal - nave triangular com detalhes
     g.fillStyle(0x00ccff, 1);
     g.fillTriangle(24, 0, 0, 48, 48, 48);
-
-    // Detalhes internos
     g.fillStyle(0x0088cc, 1);
     g.fillTriangle(24, 8, 8, 44, 40, 44);
-
-    // Cockpit
     g.fillStyle(0x00ffff, 1);
     g.fillCircle(24, 20, 5);
-
-    // Asas laterais
     g.fillStyle(0x0066aa, 1);
     g.fillTriangle(0, 48, -8, 56, 12, 48);
     g.fillTriangle(48, 48, 56, 56, 36, 48);
-
-    // Propulsores
     g.fillStyle(0xff6600, 1);
     g.fillRect(10, 46, 6, 6);
     g.fillRect(32, 46, 6, 6);
-
-    // Brilho neon
     g.lineStyle(1, 0x00ffff, 0.6);
     g.strokeTriangle(24, 0, 0, 48, 48, 48);
-
-    g.generateTexture('player', 56, 56);
+    g.generateTexture('ship_falcon', 56, 56);
+    g.generateTexture('player', 56, 56); // retrocompat
     g.destroy();
 
-    // Escudo
+    // --- VIPER (vermelha, rápida) ---
+    const v = this.make.graphics({ add: false });
+    // Corpo esguio
+    v.fillStyle(0xff2244, 1);
+    v.fillTriangle(24, 0, 4, 52, 44, 52);
+    v.fillStyle(0xcc1133, 1);
+    v.fillTriangle(24, 6, 10, 48, 38, 48);
+    // Cockpit
+    v.fillStyle(0xff6677, 1);
+    v.fillCircle(24, 18, 4);
+    // Asas finas e longas
+    v.fillStyle(0xdd0022, 1);
+    v.fillTriangle(4, 40, -12, 54, 14, 44);
+    v.fillTriangle(44, 40, 60, 54, 34, 44);
+    // Propulsores  
+    v.fillStyle(0xff8800, 1);
+    v.fillRect(14, 50, 4, 6);
+    v.fillRect(30, 50, 4, 6);
+    // Detalhe neon
+    v.lineStyle(1, 0xff4466, 0.7);
+    v.strokeTriangle(24, 0, 4, 52, 44, 52);
+    // Listras racing
+    v.lineStyle(1, 0xffcc00, 0.4);
+    v.lineBetween(24, 4, 24, 46);
+    v.generateTexture('ship_viper', 60, 58);
+    v.destroy();
+
+    // --- TITAN (verde, tanque) ---
+    const t = this.make.graphics({ add: false });
+    // Corpo largo e robusto
+    t.fillStyle(0x22ff66, 1);
+    t.fillRoundedRect(4, 8, 48, 44, 6);
+    t.fillStyle(0x11cc44, 1);
+    t.fillTriangle(28, 0, 10, 16, 46, 16);
+    // Armadura lateral
+    t.fillStyle(0x119933, 1);
+    t.fillRect(0, 14, 8, 32);
+    t.fillRect(48, 14, 8, 32);
+    // Cockpit 
+    t.fillStyle(0x88ffaa, 1);
+    t.fillCircle(28, 24, 6);
+    t.fillStyle(0x44ff88, 1);
+    t.fillCircle(28, 24, 3);
+    // Propulsores (3)
+    t.fillStyle(0xff6600, 1);
+    t.fillRect(12, 50, 6, 6);
+    t.fillRect(25, 50, 6, 6);
+    t.fillRect(38, 50, 6, 6);
+    // Contorno
+    t.lineStyle(2, 0x44ff88, 0.5);
+    t.strokeRoundedRect(4, 8, 48, 44, 6);
+    t.generateTexture('ship_titan', 56, 56);
+    t.destroy();
+
+    // Escudo (reutilizável)
     const sg = this.make.graphics({ add: false });
     sg.lineStyle(2, 0x00ffcc, 0.5);
     sg.strokeCircle(30, 30, 30);
@@ -131,14 +175,35 @@ class BootScene extends Phaser.Scene {
 
   // ========== PROJÉTEIS ==========
   generateBullets() {
-    // Tiro do jogador 
+    // Tiro do jogador (retrocompat)
     const b1 = this.make.graphics({ add: false });
     b1.fillStyle(0x00ffff, 1);
     b1.fillRoundedRect(1, 0, 6, 16, 3);
     b1.fillStyle(0xffffff, 1);
     b1.fillRoundedRect(2, 2, 4, 12, 2);
     b1.generateTexture('bullet_player', 8, 16);
+    b1.generateTexture('bullet_laser', 8, 16); // Laser = mesmo visual ciano
     b1.destroy();
+
+    // Bullet Spread (laranja, mais largo)
+    const bs = this.make.graphics({ add: false });
+    bs.fillStyle(0xff8800, 1);
+    bs.fillRoundedRect(0, 0, 8, 12, 3);
+    bs.fillStyle(0xffcc44, 1);
+    bs.fillRoundedRect(1, 1, 6, 10, 2);
+    bs.generateTexture('bullet_spread', 8, 12);
+    bs.destroy();
+
+    // Bullet Plasma (roxo, grande e brilhante)
+    const bp = this.make.graphics({ add: false });
+    bp.fillStyle(0xaa00ff, 0.6);
+    bp.fillCircle(8, 8, 8);
+    bp.fillStyle(0xcc44ff, 1);
+    bp.fillCircle(8, 8, 5);
+    bp.fillStyle(0xffffff, 1);
+    bp.fillCircle(8, 8, 2);
+    bp.generateTexture('bullet_plasma', 16, 16);
+    bp.destroy();
 
     // Tiro inimigo
     const b2 = this.make.graphics({ add: false });
@@ -245,5 +310,27 @@ class BootScene extends Phaser.Scene {
     icon.fillCircle(96, 90, 20);
     icon.generateTexture('icon-192', 192, 192);
     icon.destroy();
+  }
+
+  // ========== MOEDA ==========
+  generateCoin() {
+    const g = this.make.graphics({ add: false });
+    // Círculo dourado
+    g.fillStyle(0xffcc00, 1);
+    g.fillCircle(10, 10, 10);
+    g.fillStyle(0xffdd44, 1);
+    g.fillCircle(10, 10, 7);
+    // Símbolo $
+    g.fillStyle(0xaa8800, 1);
+    g.fillRect(8, 4, 4, 2);
+    g.fillRect(6, 6, 4, 2);
+    g.fillRect(8, 8, 4, 2);
+    g.fillRect(10, 10, 4, 2);
+    g.fillRect(8, 12, 4, 2);
+    g.fillRect(8, 14, 4, 2);
+    g.lineStyle(1, 0xffee88, 0.5);
+    g.strokeCircle(10, 10, 9);
+    g.generateTexture('coin', 20, 20);
+    g.destroy();
   }
 }

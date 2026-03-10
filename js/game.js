@@ -16,7 +16,7 @@ const config = {
       debug: false
     }
   },
-  scene: [BootScene, MenuScene, GameScene, GameOverScene],
+  scene: [BootScene, MenuScene, ShopScene, GameScene, GameOverScene],
   input: {
     activePointers: 3
   },

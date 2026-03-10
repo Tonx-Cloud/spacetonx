@@ -7,6 +7,7 @@ class GameOverScene extends Phaser.Scene {
   init(data) {
     this.finalScore = data.score || 0;
     this.finalWave = data.wave || 1;
+    this.coinsEarned = data.coins || 0;
   }
 
   create() {
@@ -25,7 +26,7 @@ class GameOverScene extends Phaser.Scene {
     }
 
     // GAME OVER
-    this.add.text(width / 2, height * 0.2, 'GAME OVER', {
+    this.add.text(width / 2, height * 0.15, 'GAME OVER', {
       fontSize: '40px',
       fontFamily: 'Impact, Arial Black, sans-serif',
       color: '#ff0044',
@@ -35,7 +36,7 @@ class GameOverScene extends Phaser.Scene {
     }).setOrigin(0.5);
 
     // Score
-    this.add.text(width / 2, height * 0.35, `PONTUAÇÃO:  ${this.finalScore}`, {
+    this.add.text(width / 2, height * 0.28, `PONTUAÇÃO:  ${this.finalScore}`, {
       fontSize: '22px',
       fontFamily: 'Courier New, monospace',
       color: '#00ffff',
@@ -43,7 +44,7 @@ class GameOverScene extends Phaser.Scene {
       strokeThickness: 2
     }).setOrigin(0.5);
 
-    this.add.text(width / 2, height * 0.42, `ONDA ALCANÇADA:  ${this.finalWave}`, {
+    this.add.text(width / 2, height * 0.35, `ONDA ALCANÇADA:  ${this.finalWave}`, {
       fontSize: '18px',
       fontFamily: 'Courier New, monospace',
       color: '#ff8800',
@@ -51,11 +52,17 @@ class GameOverScene extends Phaser.Scene {
       strokeThickness: 2
     }).setOrigin(0.5);
 
-    // Salvar high score
-    const hiScore = parseInt(localStorage.getItem('space_hiscore') || '0', 10);
-    if (this.finalScore > hiScore) {
-      localStorage.setItem('space_hiscore', String(this.finalScore));
-      this.add.text(width / 2, height * 0.5, '🏆 NOVO RECORDE!', {
+    // Moedas ganhas
+    this.add.text(width / 2, height * 0.42, `🪙  +${this.coinsEarned} moedas`, {
+      fontSize: '18px',
+      fontFamily: 'Courier New, monospace',
+      color: '#ffcc00'
+    }).setOrigin(0.5);
+
+    // Novo recorde?
+    const isNewRecord = this.finalScore >= PlayerData.hiScore && this.finalScore > 0;
+    if (isNewRecord) {
+      this.add.text(width / 2, height * 0.50, '🏆 NOVO RECORDE!', {
         fontSize: '20px',
         fontFamily: 'Impact, Arial Black, sans-serif',
         color: '#ffcc00',
@@ -63,13 +70,13 @@ class GameOverScene extends Phaser.Scene {
       }).setOrigin(0.5);
     }
 
-    this.add.text(width / 2, height * 0.57, `RECORDE: ${Math.max(hiScore, this.finalScore)}`, {
-      fontSize: '14px',
+    this.add.text(width / 2, height * 0.56, `RECORDE: ${PlayerData.hiScore}  •  TOTAL 🪙 ${PlayerData.coins}`, {
+      fontSize: '13px',
       color: '#888'
     }).setOrigin(0.5);
 
     // Botão jogar de novo
-    const btnReplay = this.add.text(width / 2, height * 0.7, '🔄  JOGAR NOVAMENTE', {
+    const btnReplay = this.add.text(width / 2, height * 0.66, '🔄  JOGAR NOVAMENTE', {
       fontSize: '20px',
       fontFamily: 'Impact, Arial Black, sans-serif',
       color: '#ffffff',
@@ -89,8 +96,21 @@ class GameOverScene extends Phaser.Scene {
       ease: 'Sine.easeInOut'
     });
 
+    // Botão loja
+    const btnShop = this.add.text(width / 2, height * 0.78, '🛒  LOJA', {
+      fontSize: '16px',
+      fontFamily: 'Impact, Arial Black, sans-serif',
+      color: '#ffffff',
+      backgroundColor: '#ff8800',
+      padding: { x: 20, y: 8 }
+    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+
+    btnShop.on('pointerover', () => btnShop.setStyle({ backgroundColor: '#ffaa33' }));
+    btnShop.on('pointerout', () => btnShop.setStyle({ backgroundColor: '#ff8800' }));
+    btnShop.on('pointerdown', () => this.scene.start('Shop', { returnScene: 'Menu' }));
+
     // Botão menu
-    const btnMenu = this.add.text(width / 2, height * 0.82, 'MENU PRINCIPAL', {
+    const btnMenu = this.add.text(width / 2, height * 0.88, 'MENU PRINCIPAL', {
       fontSize: '16px',
       fontFamily: 'Arial, sans-serif',
       color: '#aaaacc'

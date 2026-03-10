@@ -1,16 +1,18 @@
-const CACHE_NAME = 'space-shooter-v7';
+const CACHE_NAME = 'space-shooter-v8';
 const ASSETS = [
   '/',
   '/index.html',
-  '/css/style.css?v=7',
-  '/js/game.js?v=7',
-  '/js/scenes/BootScene.js?v=7',
-  '/js/scenes/MenuScene.js?v=7',
-  '/js/scenes/GameScene.js?v=7',
-  '/js/scenes/GameOverScene.js?v=7',
-  '/js/chat.js?v=7',
-  '/js/voice.js?v=7',
-  '/js/menu.js?v=7',
+  '/css/style.css?v=8',
+  '/js/playerData.js?v=8',
+  '/js/game.js?v=8',
+  '/js/scenes/BootScene.js?v=8',
+  '/js/scenes/MenuScene.js?v=8',
+  '/js/scenes/ShopScene.js?v=8',
+  '/js/scenes/GameScene.js?v=8',
+  '/js/scenes/GameOverScene.js?v=8',
+  '/js/chat.js?v=8',
+  '/js/voice.js?v=8',
+  '/js/menu.js?v=8',
   '/manifest.json'
 ];
 

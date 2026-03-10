@@ -5,16 +5,25 @@ class GameScene extends Phaser.Scene {
   }
 
   init() {
+    // Carregar dados do jogador
+    const shipStats = PlayerData.getShipStats();
+    const weaponConfig = PlayerData.getWeaponConfig();
+
     this.score = 0;
-    this.lives = 3;
+    this.coinsEarned = 0;
+    this.lives = PlayerData.getStartLives();
     this.wave = 1;
-    this.fireLevel = 1;    // 1-5 nível do tiro
-    this.hasShield = false;
+    this.fireLevel = 1;
+    this.hasShield = PlayerData.hasStartShield();
     this.shieldTimer = 0;
     this.gameOver = false;
+    this.paused = false;
     this.bossActive = false;
     this.lastFire = 0;
-    this.fireRate = 200;   // ms entre tiros
+    this.fireRate = weaponConfig.fireRate;
+    this.weaponConfig = weaponConfig;
+    this.shipStats = shipStats;
+    this.playerSpeed = shipStats.speed;
     this.touchTarget = null;
     this.enemiesKilled = 0;
     this.enemiesPerWave = 8;
@@ -22,6 +31,7 @@ class GameScene extends Phaser.Scene {
     this.waveComplete = false;
     this.spawnTimer = 0;
     this.isBossWave = false;
+    this.hasMagnet = PlayerData.hasMagnet();
   }
 
   create() {
@@ -63,9 +73,11 @@ class GameScene extends Phaser.Scene {
     this.enemyBullets = this.physics.add.group({ maxSize: 80 });
     this.enemies = this.physics.add.group();
     this.powerUps = this.physics.add.group();
+    this.coins = this.physics.add.group();
 
-    // ===== JOGADOR =====
-    this.player = this.physics.add.image(width / 2, height - 80, 'player');
+    // ===== JOGADOR (nave equipada) =====
+    const shipKey = 'ship_' + PlayerData.get('equippedShip');
+    this.player = this.physics.add.image(width / 2, height - 80, shipKey);
     this.player.setCollideWorldBounds(true);
     this.player.setDepth(10);
     this.player.body.setSize(30, 30);
@@ -87,7 +99,7 @@ class GameScene extends Phaser.Scene {
     // Escudo visual
     this.shieldSprite = this.add.image(this.player.x, this.player.y, 'shield');
     this.shieldSprite.setDepth(11);
-    this.shieldSprite.setVisible(false);
+    this.shieldSprite.setVisible(this.hasShield);
     this.shieldSprite.setBlendMode('ADD');
 
     // ===== CONTROLES =====
@@ -118,6 +130,7 @@ class GameScene extends Phaser.Scene {
     this.physics.add.overlap(this.player, this.enemies, this.playerHitByEnemy, null, this);
     this.physics.add.overlap(this.player, this.enemyBullets, this.playerHitByBullet, null, this);
     this.physics.add.overlap(this.player, this.powerUps, this.collectPowerUp, null, this);
+    this.physics.add.overlap(this.player, this.coins, this.collectCoin, null, this);
 
     // ===== HUD =====
     this.scoreText = this.add.text(10, 10, 'SCORE: 0', {
@@ -135,10 +148,53 @@ class GameScene extends Phaser.Scene {
     this.livesContainer = this.add.container(10, 36).setDepth(100).setScrollFactor(0);
     this.updateLivesDisplay();
 
-    this.fireLevelText = this.add.text(10, 58, '🔫 Nv.1', {
+    this.fireLevelText = this.add.text(10, 58, `🔫 ${this.weaponConfig.name}`, {
       fontSize: '13px', fontFamily: 'Arial, sans-serif',
       color: '#ffcc00'
     }).setDepth(100).setScrollFactor(0);
+
+    // HUD de moedas
+    this.coinHudText = this.add.text(width - 10, 30, `🪙 ${this.coinsEarned}`, {
+      fontSize: '14px', fontFamily: 'Courier New, monospace',
+      color: '#ffcc00',
+      stroke: '#332200', strokeThickness: 2
+    }).setOrigin(1, 0).setDepth(100).setScrollFactor(0);
+
+    // ===== BOTÃO PAUSE =====
+    this.pauseBtn = this.add.text(width / 2, 12, '⏸️', {
+      fontSize: '22px'
+    }).setOrigin(0.5, 0).setDepth(100).setInteractive({ useHandCursor: true });
+    this.pauseBtn.on('pointerdown', () => this.togglePause());
+
+    // Overlay de pausa (inicialmente invisível)
+    this.pauseOverlay = this.add.container(0, 0).setDepth(200).setVisible(false);
+
+    const pauseBg = this.add.graphics();
+    pauseBg.fillStyle(0x000000, 0.75);
+    pauseBg.fillRect(0, 0, width, height);
+    this.pauseOverlay.add(pauseBg);
+
+    const pauseTitle = this.add.text(width / 2, height * 0.25, '⏸️ PAUSADO', {
+      fontSize: '32px', fontFamily: 'Impact, Arial Black, sans-serif',
+      color: '#ffffff',
+      stroke: '#000000', strokeThickness: 4
+    }).setOrigin(0.5);
+    this.pauseOverlay.add(pauseTitle);
+
+    const btnContinue = this.createPauseButton(width / 2, height * 0.42, '▶  CONTINUAR', () => {
+      this.togglePause();
+    });
+    this.pauseOverlay.add(btnContinue);
+
+    const btnShop = this.createPauseButton(width / 2, height * 0.54, '🛒  LOJA', () => {
+      this.scene.start('Shop', { returnScene: 'Menu' });
+    });
+    this.pauseOverlay.add(btnShop);
+
+    const btnMenu = this.createPauseButton(width / 2, height * 0.66, '🏠  MENU', () => {
+      this.scene.start('Menu');
+    });
+    this.pauseOverlay.add(btnMenu);
 
     // ===== INICIAR PRIMEIRA ONDA =====
     this.startWave(1);
@@ -156,6 +212,55 @@ class GameScene extends Phaser.Scene {
     } catch (e) {
       this.audioCtx = null;
     }
+  }
+
+  // ==========================================
+  //              PAUSE
+  // ==========================================
+  createPauseButton(x, y, text, callback) {
+    const btn = this.add.text(x, y, text, {
+      fontSize: '20px',
+      fontFamily: 'Impact, Arial Black, sans-serif',
+      color: '#ffffff',
+      backgroundColor: '#ff0044',
+      padding: { x: 24, y: 10 }
+    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+    btn.on('pointerdown', callback);
+    return btn;
+  }
+
+  togglePause() {
+    this.paused = !this.paused;
+    this.pauseOverlay.setVisible(this.paused);
+    if (this.paused) {
+      this.physics.pause();
+      this.pauseBtn.setText('▶️');
+    } else {
+      this.physics.resume();
+      this.pauseBtn.setText('⏸️');
+    }
+  }
+
+  // ==========================================
+  //          COLETA DE MOEDAS
+  // ==========================================
+  dropCoin(x, y) {
+    const c = this.coins.create(x, y, 'coin');
+    c.body.setVelocityY(80);
+    this.tweens.add({
+      targets: c,
+      angle: 360,
+      duration: 1500,
+      repeat: -1
+    });
+  }
+
+  collectCoin(player, coin) {
+    coin.destroy();
+    this.coinsEarned++;
+    PlayerData.addCoins(1);
+    this.coinHudText.setText(`🪙 ${this.coinsEarned}`);
+    this.playSound('powerup');
   }
 
   playSound(type) {
@@ -438,9 +543,11 @@ class GameScene extends Phaser.Scene {
 
     const x = this.player.x;
     const y = this.player.y - 20;
+    const wc = this.weaponConfig;
+    const bulletKey = wc.bulletKey || 'bullet_player';
 
     const shootBullet = (offsetX, angle) => {
-      const bullet = this.playerBullets.get(x + offsetX, y, 'bullet_player');
+      const bullet = this.playerBullets.get(x + offsetX, y, bulletKey);
       if (!bullet) return;
       bullet.setActive(true).setVisible(true);
       bullet.body.enable = true;
@@ -449,36 +556,57 @@ class GameScene extends Phaser.Scene {
         Math.sin(angle) * Math.abs(speed) * 0.3,
         speed
       );
+      bullet._damage = wc.damage || 1;
       bullet.setDepth(8);
     };
 
-    // Padrão de tiro baseado no nível de arma
-    switch (this.fireLevel) {
-      case 1:
-        shootBullet(0, 0);
-        break;
-      case 2:
-        shootBullet(-8, 0);
-        shootBullet(8, 0);
-        break;
-      case 3:
-        shootBullet(-8, 0);
-        shootBullet(8, 0);
-        shootBullet(0, -0.15);
-        break;
-      case 4:
-        shootBullet(-12, -0.1);
-        shootBullet(-4, 0);
-        shootBullet(4, 0);
-        shootBullet(12, 0.1);
-        break;
-      case 5:
-        shootBullet(-16, -0.2);
-        shootBullet(-8, -0.1);
-        shootBullet(0, 0);
-        shootBullet(8, 0.1);
-        shootBullet(16, 0.2);
-        break;
+    if (wc.pattern === 'spread') {
+      // Spread: sempre atira em leque (3-5 tiros conforme fireLevel)
+      const count = Math.min(2 + this.fireLevel, 5);
+      const arc = 0.4; // amplitude do leque
+      for (let i = 0; i < count; i++) {
+        const angle = -arc + (arc * 2 / (count - 1)) * i;
+        shootBullet(0, count === 1 ? 0 : angle);
+      }
+    } else if (wc.pattern === 'plasma') {
+      // Plasma: tiro único poderoso (escala com fireLevel)
+      const bullet = this.playerBullets.get(x, y, bulletKey);
+      if (!bullet) return;
+      bullet.setActive(true).setVisible(true);
+      bullet.body.enable = true;
+      bullet.body.setVelocity(0, -350);
+      bullet._damage = wc.damage + Math.floor(this.fireLevel / 2);
+      bullet.setDepth(8);
+      bullet.setScale(1 + this.fireLevel * 0.15);
+    } else {
+      // Laser (padrão): baseado no fireLevel
+      switch (this.fireLevel) {
+        case 1:
+          shootBullet(0, 0);
+          break;
+        case 2:
+          shootBullet(-8, 0);
+          shootBullet(8, 0);
+          break;
+        case 3:
+          shootBullet(-8, 0);
+          shootBullet(8, 0);
+          shootBullet(0, -0.15);
+          break;
+        case 4:
+          shootBullet(-12, -0.1);
+          shootBullet(-4, 0);
+          shootBullet(4, 0);
+          shootBullet(12, 0.1);
+          break;
+        case 5:
+          shootBullet(-16, -0.2);
+          shootBullet(-8, -0.1);
+          shootBullet(0, 0);
+          shootBullet(8, 0.1);
+          shootBullet(16, 0.2);
+          break;
+      }
     }
 
     this.playSound('shoot');
@@ -519,10 +647,12 @@ class GameScene extends Phaser.Scene {
   //             COLISÕES
   // ==========================================
   hitEnemy(bullet, enemy) {
+    const dmg = bullet._damage || 1;
     bullet.setActive(false).setVisible(false);
     bullet.body.enable = false;
+    bullet.setScale(1); // reset escala plasma
 
-    enemy._hp--;
+    enemy._hp -= dmg;
 
     // Flash branco ao ser atingido
     enemy.setTintFill(0xffffff);
@@ -555,6 +685,12 @@ class GameScene extends Phaser.Scene {
 
     this.score += enemy._score;
     this.scoreText.setText(`SCORE: ${this.score}`);
+
+    // Drop de moedas (baseado no tipo)
+    const coinCount = enemy._type === 'boss' ? 15 : (enemy._type === 'enemy3' ? 3 : (enemy._type === 'enemy2' ? 2 : 1));
+    for (let i = 0; i < coinCount; i++) {
+      this.dropCoin(enemy.x + Phaser.Math.Between(-20, 20), enemy.y + Phaser.Math.Between(-10, 10));
+    }
 
     // Chance de dropar power-up
     if (Math.random() < 0.2) {
@@ -668,8 +804,8 @@ class GameScene extends Phaser.Scene {
         break;
       case 'powerup_fire':
         this.fireLevel = Math.min(5, this.fireLevel + 1);
-        this.fireRate = Math.max(100, 200 - this.fireLevel * 15);
-        this.fireLevelText.setText(`🔫 Nv.${this.fireLevel}`);
+        this.fireRate = Math.max(80, this.weaponConfig.fireRate - this.fireLevel * 15);
+        this.fireLevelText.setText(`🔫 ${this.weaponConfig.name} Nv.${this.fireLevel}`);
         this.showPowerUpText(`ARMA Nv.${this.fireLevel}!`, '#ffcc00');
         break;
       case 'powerup_life':
@@ -736,6 +872,11 @@ class GameScene extends Phaser.Scene {
     this.player.setVisible(false);
     this.thrusterParticles.stop();
 
+    // Salvar hi-score
+    if (this.score > PlayerData.hiScore) {
+      PlayerData.hiScore = this.score;
+    }
+
     // Explosão do jogador
     this.add.particles(this.player.x, this.player.y, 'particle', {
       speed: { min: 50, max: 250 },
@@ -753,7 +894,8 @@ class GameScene extends Phaser.Scene {
     this.time.delayedCall(2000, () => {
       this.scene.start('GameOver', {
         score: this.score,
-        wave: this.wave
+        wave: this.wave,
+        coins: this.coinsEarned
       });
     });
   }
@@ -762,7 +904,7 @@ class GameScene extends Phaser.Scene {
   //           UPDATE LOOP
   // ==========================================
   update(time, delta) {
-    if (this.gameOver) return;
+    if (this.gameOver || this.paused) return;
 
     const { width, height } = this.scale;
 
@@ -778,7 +920,7 @@ class GameScene extends Phaser.Scene {
     });
 
     // --- Movimento do jogador ---
-    const speed = 300;
+    const speed = this.playerSpeed;
     let vx = 0, vy = 0;
 
     // Teclado
@@ -873,6 +1015,22 @@ class GameScene extends Phaser.Scene {
     this.powerUps.getChildren().forEach(pu => {
       if (pu.active && pu.y > height + 30) {
         pu.destroy();
+      }
+    });
+
+    // --- Moedas: magnetismo + fora da tela ---
+    this.coins.getChildren().forEach(c => {
+      if (!c.active) return;
+      if (c.y > height + 30) { c.destroy(); return; }
+      // Magnetismo atrai moedas ao jogador
+      if (this.hasMagnet) {
+        const dx = this.player.x - c.x;
+        const dy = this.player.y - c.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 150) {
+          const pull = 200;
+          c.body.setVelocity((dx / dist) * pull, (dy / dist) * pull);
+        }
       }
     });
   }
