@@ -1,16 +1,16 @@
-const CACHE_NAME = 'space-shooter-v4';
+const CACHE_NAME = 'space-shooter-v5';
 const ASSETS = [
   '/',
   '/index.html',
-  '/css/style.css',
-  '/js/game.js',
-  '/js/scenes/BootScene.js',
-  '/js/scenes/MenuScene.js',
-  '/js/scenes/GameScene.js',
-  '/js/scenes/GameOverScene.js',
-  '/js/chat.js',
-  '/js/voice.js',
-  '/js/menu.js',
+  '/css/style.css?v=4',
+  '/js/game.js?v=4',
+  '/js/scenes/BootScene.js?v=4',
+  '/js/scenes/MenuScene.js?v=4',
+  '/js/scenes/GameScene.js?v=4',
+  '/js/scenes/GameOverScene.js?v=4',
+  '/js/chat.js?v=4',
+  '/js/voice.js?v=4',
+  '/js/menu.js?v=4',
   '/manifest.json'
 ];
 
