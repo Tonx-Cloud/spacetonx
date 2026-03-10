@@ -7,7 +7,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="manifest" href="manifest.json">
-  <link rel="stylesheet" href="css/style.css?v=6">
+  <link rel="stylesheet" href="css/style.css?v=7">
   <title>Space Shooter - Ataque Galáctico</title>
 </head>
 <body>
@@ -130,11 +130,12 @@
     </div>
     <div id="chat-messages"></div>
     <div id="chat-input-area">
+      <button id="chat-mic-btn" onclick="if(VoiceChat.isActive){VoiceChat.toggleMute();}else{VoiceChat.join();}" title="Voz">🎙️</button>
       <input type="text" id="chat-input" placeholder="Digite sua mensagem..." maxlength="200" autocomplete="off">
       <button id="chat-send" onclick="sendChatMessage()">➤</button>
     </div>
   </div>
-  <button id="chat-open-btn" onclick="toggleChat()">💬</button>
+  <button id="chat-open-btn" onclick="toggleChat()">💬<span id="chat-badge" class="chat-badge" style="display:none;">0</span></button>
 
   <!-- ===== MODAL SOBRE ===== -->
   <div id="about-modal" class="modal-overlay">
@@ -189,14 +190,14 @@
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
 
   <!-- Game Scripts -->
-  <script src="js/scenes/BootScene.js?v=6"></script>
-  <script src="js/scenes/MenuScene.js?v=6"></script>
-  <script src="js/scenes/GameScene.js?v=6"></script>
-  <script src="js/scenes/GameOverScene.js?v=6"></script>
-  <script src="js/chat.js?v=6"></script>
-  <script src="js/voice.js?v=6"></script>
-  <script src="js/menu.js?v=6"></script>
-  <script src="js/game.js?v=6"></script>
+  <script src="js/scenes/BootScene.js?v=7"></script>
+  <script src="js/scenes/MenuScene.js?v=7"></script>
+  <script src="js/scenes/GameScene.js?v=7"></script>
+  <script src="js/scenes/GameOverScene.js?v=7"></script>
+  <script src="js/chat.js?v=7"></script>
+  <script src="js/voice.js?v=7"></script>
+  <script src="js/menu.js?v=7"></script>
+  <script src="js/game.js?v=7"></script>
 
   <script>
     // Limpar SWs antigos e registrar novo

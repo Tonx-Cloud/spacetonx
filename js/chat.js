@@ -10,6 +10,7 @@ const ChatSystem = (() => {
   let presenceKey = '';
   let onlinePlayers = [];  // [{username, voiceActive, isMuted, isMe}]
   let onPresenceChange = null; // callback externo
+  let unreadCount = 0;
 
   function generateUsername() {
     const adjectives = ['Astro', 'Cosmic', 'Star', 'Nova', 'Blaze', 'Shadow', 'Neon', 'Turbo', 'Hyper', 'Pixel'];
@@ -147,6 +148,12 @@ const ChatSystem = (() => {
     // Limitar mensagens
     while (container.children.length > 100) {
       container.removeChild(container.firstChild);
+    }
+
+    // Badge de mensagem nova quando chat fechado
+    if (!isOpen) {
+      unreadCount++;
+      updateChatBadge();
     }
   }
 
@@ -337,10 +344,23 @@ const ChatSystem = (() => {
     }
 
     if (isOpen) {
+      unreadCount = 0;
+      updateChatBadge();
       setTimeout(() => {
         const input = document.getElementById('chat-input');
         if (input) input.focus();
       }, 100);
+    }
+  }
+
+  function updateChatBadge() {
+    const badge = document.getElementById('chat-badge');
+    if (!badge) return;
+    if (unreadCount > 0) {
+      badge.textContent = unreadCount > 99 ? '99+' : unreadCount;
+      badge.style.display = 'flex';
+    } else {
+      badge.style.display = 'none';
     }
   }
 

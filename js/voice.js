@@ -1,6 +1,7 @@
-// VoiceChat - Chat de voz via WebRTC
-// Reutiliza o canal Supabase Realtime do ChatSystem
-// Sinalização WebRTC via broadcast + descoberta de peers via Presence
+// VoiceChat - Chat de voz via WebRTC (estilo Discord - sala única)
+// Usa Supabase Realtime broadcast para sinalização WebRTC
+// Vanilla ICE: aguarda todos os ICE candidates antes de enviar SDP
+// Isso evita perda de candidates em canais unreliable
 
 const VoiceChat = (() => {
   let localStream = null;
@@ -12,8 +13,6 @@ const VoiceChat = (() => {
   let pendingOffers = new Set();
   let chatChannel = null;
   let audioContext = null;
-  let iceCandidateBuffer = {};
-  let remoteDescSet = {};
   let listenersRegistered = false;
 
   const ICE_SERVERS = [
@@ -23,19 +22,19 @@ const VoiceChat = (() => {
     { urls: 'stun:stun3.l.google.com:19302' },
     { urls: 'stun:stun4.l.google.com:19302' },
     {
-      urls: 'turn:openrelay.metered.ca:80',
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
+      urls: 'turn:standard.relay.metered.ca:80',
+      username: 'b093b4e78e16e45f53e24660',
+      credential: '5USROhVAhm/fcFnl'
     },
     {
-      urls: 'turn:openrelay.metered.ca:443',
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
+      urls: 'turn:standard.relay.metered.ca:443',
+      username: 'b093b4e78e16e45f53e24660',
+      credential: '5USROhVAhm/fcFnl'
     },
     {
-      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
+      urls: 'turn:standard.relay.metered.ca:443?transport=tcp',
+      username: 'b093b4e78e16e45f53e24660',
+      credential: '5USROhVAhm/fcFnl'
     }
   ];
 
@@ -78,14 +77,34 @@ const VoiceChat = (() => {
     return myPeerId < remotePeerId;
   }
 
+  // Aguarda ICE gathering completar (vanilla ICE)
+  function waitForIceGathering(pc, timeout) {
+    timeout = timeout || 5000;
+    return new Promise(function(resolve) {
+      if (pc.iceGatheringState === 'complete') {
+        return resolve();
+      }
+      var timer = setTimeout(function() {
+        console.log('[Voice] ICE gathering timeout, enviando parcial');
+        resolve();
+      }, timeout);
+      pc.addEventListener('icegatheringstatechange', function() {
+        if (pc.iceGatheringState === 'complete') {
+          clearTimeout(timer);
+          resolve();
+        }
+      });
+    });
+  }
+
   async function join() {
     if (isActive) return;
     updateVoiceStatus('connecting', 'Conectando...');
 
     if (!ChatSystem.channel) { ChatSystem.init(); }
-    const ch = await waitForChannel();
+    var ch = await waitForChannel();
     if (!ch) {
-      updateVoiceStatus('offline', 'Chat não conectado — tente novamente');
+      updateVoiceStatus('offline', 'Chat não conectado');
       return;
     }
 
@@ -100,14 +119,11 @@ const VoiceChat = (() => {
       return;
     }
 
-    // Desbloquear áudio no mobile (dentro do gesto do usuário)
+    // Desbloquear áudio no mobile
     try {
       audioContext = new (window.AudioContext || window.webkitAudioContext)();
       await audioContext.resume();
-      console.log('[Voice] AudioContext desbloqueado, state:', audioContext.state);
-    } catch (e) {
-      console.warn('[Voice] AudioContext falhou:', e);
-    }
+    } catch (e) { /* ok */ }
 
     myPeerId = generatePeerId();
     isActive = true;
@@ -116,7 +132,6 @@ const VoiceChat = (() => {
     syncGlobals();
     updateVoiceUI();
 
-    // Registrar listeners apenas uma vez para não acumular
     if (!listenersRegistered) {
       chatChannel.on('broadcast', { event: 'voice-signal' }, handleSignal);
       chatChannel.on('presence', { event: 'sync' }, handlePresenceSync);
@@ -127,43 +142,40 @@ const VoiceChat = (() => {
     await ChatSystem.updatePresence();
 
     updateVoiceStatus('connected', 'Na sala de voz');
-    console.log('[Voice] Entrou na sala, peerId:', myPeerId);
+    console.log('[Voice] Entrou, peerId:', myPeerId);
 
-    // Retry: verificar peers após 2s caso sync tenha sido perdido
-    setTimeout(() => { if (isActive) handlePresenceSync(); }, 2000);
-    setTimeout(() => { if (isActive) handlePresenceSync(); }, 5000);
+    // Retries para encontrar peers
+    setTimeout(function() { if (isActive) handlePresenceSync(); }, 2000);
+    setTimeout(function() { if (isActive) handlePresenceSync(); }, 5000);
+    setTimeout(function() { if (isActive) handlePresenceSync(); }, 10000);
   }
 
   async function handleSignal(payload) {
-    const data = payload.payload;
+    var data = payload.payload;
     if (!data || data.target !== myPeerId) return;
+    if (!isActive) return;
 
-    console.log('[Voice] Sinal recebido:', data.type, 'de', data.from);
+    console.log('[Voice] Sinal:', data.type, 'de', data.from);
 
     try {
-      switch (data.type) {
-        case 'offer':
-          await handleOffer(data.from, data.sdp);
-          break;
-        case 'answer':
-          await handleAnswer(data.from, data.sdp);
-          break;
-        case 'ice-candidate':
-          await handleIceCandidate(data.from, data.candidate);
-          break;
+      if (data.type === 'offer') {
+        await handleOffer(data.from, data.sdp);
+      } else if (data.type === 'answer') {
+        await handleAnswer(data.from, data.sdp);
       }
     } catch (e) {
-      console.warn('[Voice] Erro ao processar sinal:', data.type, e);
+      console.warn('[Voice] Erro sinal:', data.type, e);
     }
   }
 
   function handlePresenceSync() {
     if (!isActive) return;
-    const remotePeers = getVoicePeerIds();
-    console.log('[Voice] Presence sync — peers de voz:', remotePeers.length, remotePeers);
-    for (const rId of remotePeers) {
+    var remotePeers = getVoicePeerIds();
+    console.log('[Voice] Sync — peers:', remotePeers);
+    for (var i = 0; i < remotePeers.length; i++) {
+      var rId = remotePeers[i];
       if (!peers[rId] && !pendingOffers.has(rId) && shouldInitiate(rId)) {
-        console.log('[Voice] Iniciando oferta para', rId);
+        console.log('[Voice] Criando oferta para', rId);
         pendingOffers.add(rId);
         createOffer(rId);
       }
@@ -171,196 +183,143 @@ const VoiceChat = (() => {
     updatePeerCount();
   }
 
-  function handlePresenceLeave({ leftPresences }) {
-    for (const p of leftPresences) {
+  function handlePresenceLeave(ev) {
+    var leftPresences = ev.leftPresences;
+    for (var i = 0; i < leftPresences.length; i++) {
+      var p = leftPresences[i];
       if (p.voicePeerId && peers[p.voicePeerId]) {
         removePeer(p.voicePeerId);
       }
     }
   }
 
+  // Vanilla ICE: cria offer → aguarda TODOS ICE candidates → envia SDP completo
   async function createOffer(remotePeerId) {
-    const pc = createPeerConnection(remotePeerId);
-    const offer = await pc.createOffer();
+    var pc = createPeerConnection(remotePeerId);
+    var offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
 
-    console.log('[Voice] Oferta criada para', remotePeerId);
+    await waitForIceGathering(pc);
+
+    var completeSdp = pc.localDescription;
+    console.log('[Voice] Oferta completa →', remotePeerId);
 
     chatChannel.send({
       type: 'broadcast',
       event: 'voice-signal',
-      payload: { type: 'offer', from: myPeerId, target: remotePeerId, sdp: pc.localDescription }
+      payload: { type: 'offer', from: myPeerId, target: remotePeerId, sdp: completeSdp }
     });
   }
 
+  // Vanilla ICE: processa offer → cria answer → aguarda ICE → envia
   async function handleOffer(remotePeerId, sdp) {
     console.log('[Voice] Processando oferta de', remotePeerId);
-    const pc = createPeerConnection(remotePeerId);
+
+    if (peers[remotePeerId]) {
+      peers[remotePeerId].close();
+      delete peers[remotePeerId];
+    }
+
+    var pc = createPeerConnection(remotePeerId);
     await pc.setRemoteDescription(new RTCSessionDescription(sdp));
-    remoteDescSet[remotePeerId] = true;
-
-    // Flush ICE candidates que chegaram antes do SDP
-    await flushIceCandidates(remotePeerId);
-
-    const answer = await pc.createAnswer();
+    var answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
 
-    console.log('[Voice] Resposta enviada para', remotePeerId);
+    await waitForIceGathering(pc);
+
+    var completeSdp = pc.localDescription;
+    console.log('[Voice] Resposta completa →', remotePeerId);
 
     chatChannel.send({
       type: 'broadcast',
       event: 'voice-signal',
-      payload: { type: 'answer', from: myPeerId, target: remotePeerId, sdp: pc.localDescription }
+      payload: { type: 'answer', from: myPeerId, target: remotePeerId, sdp: completeSdp }
     });
   }
 
   async function handleAnswer(remotePeerId, sdp) {
-    const pc = peers[remotePeerId];
+    var pc = peers[remotePeerId];
     if (!pc) return;
-    console.log('[Voice] Processando resposta de', remotePeerId);
+    console.log('[Voice] Resposta de', remotePeerId);
     await pc.setRemoteDescription(new RTCSessionDescription(sdp));
-    remoteDescSet[remotePeerId] = true;
-
-    await flushIceCandidates(remotePeerId);
-  }
-
-  async function handleIceCandidate(remotePeerId, candidate) {
-    const pc = peers[remotePeerId];
-    if (!pc) return;
-
-    if (!remoteDescSet[remotePeerId]) {
-      // Buffering: SDP ainda não chegou
-      if (!iceCandidateBuffer[remotePeerId]) iceCandidateBuffer[remotePeerId] = [];
-      iceCandidateBuffer[remotePeerId].push(candidate);
-      console.log('[Voice] ICE candidate bufferizado para', remotePeerId);
-      return;
-    }
-
-    await pc.addIceCandidate(new RTCIceCandidate(candidate));
-  }
-
-  async function flushIceCandidates(remotePeerId) {
-    const buffer = iceCandidateBuffer[remotePeerId];
-    if (!buffer || buffer.length === 0) return;
-    const pc = peers[remotePeerId];
-    if (!pc) return;
-
-    console.log('[Voice] Flushing', buffer.length, 'ICE candidates para', remotePeerId);
-    for (const c of buffer) {
-      try {
-        await pc.addIceCandidate(new RTCIceCandidate(c));
-      } catch (e) {
-        console.warn('[Voice] ICE candidate falhou:', e);
-      }
-    }
-    iceCandidateBuffer[remotePeerId] = [];
   }
 
   function createPeerConnection(remotePeerId) {
-    if (peers[remotePeerId]) {
-      peers[remotePeerId].close();
-    }
-
-    iceCandidateBuffer[remotePeerId] = [];
-    remoteDescSet[remotePeerId] = false;
-
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+    var pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
     peers[remotePeerId] = pc;
 
     if (localStream) {
-      localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+      localStream.getTracks().forEach(function(track) {
+        pc.addTrack(track, localStream);
+      });
     }
 
-    pc.onicecandidate = (event) => {
-      if (event.candidate && chatChannel) {
-        chatChannel.send({
-          type: 'broadcast',
-          event: 'voice-signal',
-          payload: { type: 'ice-candidate', from: myPeerId, target: remotePeerId, candidate: event.candidate }
-        });
-      }
-    };
+    // Vanilla ICE: não enviamos candidates separados
+    pc.onicecandidate = function() {};
 
-    pc.ontrack = (event) => {
-      console.log('[Voice] Track recebida de', remotePeerId);
+    pc.ontrack = function(event) {
+      console.log('[Voice] Track de', remotePeerId);
 
-      // Rota 1: AudioContext (funciona no mobile)
-      if (audioContext && audioContext.state === 'running') {
+      // AudioContext (mobile)
+      if (audioContext) {
         try {
-          const stream = new MediaStream([event.track]);
-          const source = audioContext.createMediaStreamSource(stream);
+          if (audioContext.state === 'suspended') audioContext.resume();
+          var source = audioContext.createMediaStreamSource(event.streams[0]);
           source.connect(audioContext.destination);
-          console.log('[Voice] Áudio roteado via AudioContext');
-        } catch (e) {
-          console.warn('[Voice] AudioContext routing falhou:', e);
-        }
+        } catch (e) { /* fallback below */ }
       }
 
-      // Rota 2: Audio element (fallback)
-      const audioId = 'voice-audio-' + remotePeerId;
-      const old = document.getElementById(audioId);
+      // Audio element
+      var audioId = 'voice-audio-' + remotePeerId;
+      var old = document.getElementById(audioId);
       if (old) old.remove();
 
-      const audio = document.createElement('audio');
+      var audio = document.createElement('audio');
       audio.srcObject = event.streams[0];
       audio.id = audioId;
       audio.autoplay = true;
       audio.playsInline = true;
+      audio.volume = 1.0;
       audio.setAttribute('playsinline', '');
-      audio.play().catch(e => console.warn('[Voice] Audio.play() bloqueado:', e));
       document.body.appendChild(audio);
+      audio.play().catch(function(e) { console.warn('[Voice] play():', e); });
 
       connectedPeers.add(remotePeerId);
       updatePeerCount();
+      updateVoiceStatus('connected', connectedPeers.size + ' conectado(s)');
     };
 
-    pc.oniceconnectionstatechange = () => {
-      const state = pc.iceConnectionState;
-      console.log('[Voice] ICE state com', remotePeerId, ':', state);
+    pc.oniceconnectionstatechange = function() {
+      var state = pc.iceConnectionState;
+      console.log('[Voice] ICE:', remotePeerId, state);
 
+      if (state === 'connected' || state === 'completed') {
+        connectedPeers.add(remotePeerId);
+        updatePeerCount();
+        updateVoiceStatus('connected', connectedPeers.size + ' conectado(s)');
+      }
       if (state === 'failed') {
-        console.log('[Voice] ICE failed, tentando restart...');
+        removePeer(remotePeerId);
+        pendingOffers.delete(remotePeerId);
         if (shouldInitiate(remotePeerId)) {
-          recreateOffer(remotePeerId);
+          setTimeout(function() {
+            if (isActive && !peers[remotePeerId]) {
+              pendingOffers.add(remotePeerId);
+              createOffer(remotePeerId);
+            }
+          }, 3000);
         }
       }
       if (state === 'disconnected') {
-        setTimeout(() => {
+        setTimeout(function() {
           if (peers[remotePeerId] && peers[remotePeerId].iceConnectionState === 'disconnected') {
             removePeer(remotePeerId);
           }
         }, 5000);
       }
-      if (state === 'connected') {
-        console.log('[Voice] ✅ Conectado com áudio a', remotePeerId);
-      }
-    };
-
-    pc.onconnectionstatechange = () => {
-      console.log('[Voice] Connection state com', remotePeerId, ':', pc.connectionState);
-      if (pc.connectionState === 'failed') {
-        removePeer(remotePeerId);
-      }
     };
 
     return pc;
-  }
-
-  async function recreateOffer(remotePeerId) {
-    const pc = peers[remotePeerId];
-    if (!pc) return;
-    try {
-      const offer = await pc.createOffer({ iceRestart: true });
-      await pc.setLocalDescription(offer);
-      chatChannel.send({
-        type: 'broadcast',
-        event: 'voice-signal',
-        payload: { type: 'offer', from: myPeerId, target: remotePeerId, sdp: pc.localDescription }
-      });
-      console.log('[Voice] ICE restart offer enviada para', remotePeerId);
-    } catch (e) {
-      console.warn('[Voice] ICE restart falhou:', e);
-    }
   }
 
   function removePeer(peerId) {
@@ -369,9 +328,7 @@ const VoiceChat = (() => {
       delete peers[peerId];
     }
     pendingOffers.delete(peerId);
-    delete iceCandidateBuffer[peerId];
-    delete remoteDescSet[peerId];
-    const audioEl = document.getElementById('voice-audio-' + peerId);
+    var audioEl = document.getElementById('voice-audio-' + peerId);
     if (audioEl) audioEl.remove();
     connectedPeers.delete(peerId);
     updatePeerCount();
@@ -379,36 +336,31 @@ const VoiceChat = (() => {
 
   function leave() {
     if (!isActive) return;
-
     Object.keys(peers).forEach(removePeer);
-
     if (localStream) {
-      localStream.getTracks().forEach(t => t.stop());
+      localStream.getTracks().forEach(function(t) { t.stop(); });
       localStream = null;
     }
-
     if (audioContext) {
-      audioContext.close().catch(() => {});
+      audioContext.close().catch(function() {});
       audioContext = null;
     }
-
     isActive = false;
     isMuted = false;
     myPeerId = '';
     connectedPeers.clear();
     pendingOffers.clear();
     chatChannel = null;
-    // NÃO resetar listenersRegistered — o canal é o mesmo
     syncGlobals();
     ChatSystem.updatePresence();
     updateVoiceUI();
-    updateVoiceStatus('offline', 'Desconectado da voz');
+    updateVoiceStatus('offline', 'Desconectado');
   }
 
   function toggleMute() {
     if (!isActive || !localStream) return;
     isMuted = !isMuted;
-    localStream.getAudioTracks().forEach(track => { track.enabled = !isMuted; });
+    localStream.getAudioTracks().forEach(function(track) { track.enabled = !isMuted; });
     syncGlobals();
     ChatSystem.updatePresence();
     updateVoiceUI();
@@ -424,18 +376,17 @@ const VoiceChat = (() => {
     window._voicePeerId = myPeerId || null;
   }
 
-  // ===== UI Helpers =====
   function updateVoiceUI() {
-    const btn = document.getElementById('voice-toggle-btn');
-    const muteBtn = document.getElementById('voice-mute-btn');
-    const indicator = document.getElementById('voice-indicator');
+    var btn = document.getElementById('voice-toggle-btn');
+    var muteBtn = document.getElementById('voice-mute-btn');
+    var indicator = document.getElementById('voice-indicator');
 
     if (btn) {
-      const label = btn.querySelector('.menu-item-label');
-      const desc = btn.querySelector('.menu-item-desc');
-      const icon = btn.querySelector('.menu-item-icon');
+      var label = btn.querySelector('.menu-item-label');
+      var desc = btn.querySelector('.menu-item-desc');
+      var icon = btn.querySelector('.menu-item-icon');
       if (label) label.textContent = isActive ? 'Sair da Voz' : 'Entrar na Voz';
-      if (desc) desc.textContent = isActive ? 'Conectado — clique para sair' : 'Sala de voz com todos os jogadores';
+      if (desc) desc.textContent = isActive ? 'Conectado' : 'Sala de voz';
       if (icon) icon.textContent = isActive ? '🔊' : '🎙️';
       btn.classList.toggle('voice-active', isActive);
     }
@@ -450,18 +401,26 @@ const VoiceChat = (() => {
       indicator.style.display = isActive ? 'flex' : 'none';
       indicator.classList.toggle('voice-muted', isMuted);
     }
+
+    // Atualizar botão mic no chat
+    var chatMic = document.getElementById('chat-mic-btn');
+    if (chatMic) {
+      chatMic.textContent = !isActive ? '🎙️' : (isMuted ? '🔇' : '🎤');
+      chatMic.classList.toggle('mic-active', isActive && !isMuted);
+      chatMic.classList.toggle('mic-muted', isActive && isMuted);
+    }
   }
 
   function updatePeerCount() {
-    const countEl = document.getElementById('voice-peer-count');
+    var countEl = document.getElementById('voice-peer-count');
     if (countEl) {
-      const count = connectedPeers.size + (isActive ? 1 : 0);
-      countEl.textContent = `${count} na sala`;
+      var count = connectedPeers.size + (isActive ? 1 : 0);
+      countEl.textContent = count + ' na sala';
     }
   }
 
   function updateVoiceStatus(status, msg) {
-    const statusEl = document.getElementById('voice-status');
+    var statusEl = document.getElementById('voice-status');
     if (statusEl) {
       statusEl.textContent = msg;
       statusEl.className = 'voice-status voice-' + status;
