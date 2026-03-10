@@ -7,7 +7,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="manifest" href="manifest.json">
-  <link rel="stylesheet" href="css/style.css?v=4">
+  <link rel="stylesheet" href="css/style.css?v=6">
   <title>Space Shooter - Ataque Galáctico</title>
 </head>
 <body>
@@ -189,14 +189,14 @@
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
 
   <!-- Game Scripts -->
-  <script src="js/scenes/BootScene.js?v=4"></script>
-  <script src="js/scenes/MenuScene.js?v=4"></script>
-  <script src="js/scenes/GameScene.js?v=4"></script>
-  <script src="js/scenes/GameOverScene.js?v=4"></script>
-  <script src="js/chat.js?v=4"></script>
-  <script src="js/voice.js?v=4"></script>
-  <script src="js/menu.js?v=4"></script>
-  <script src="js/game.js?v=4"></script>
+  <script src="js/scenes/BootScene.js?v=6"></script>
+  <script src="js/scenes/MenuScene.js?v=6"></script>
+  <script src="js/scenes/GameScene.js?v=6"></script>
+  <script src="js/scenes/GameOverScene.js?v=6"></script>
+  <script src="js/chat.js?v=6"></script>
+  <script src="js/voice.js?v=6"></script>
+  <script src="js/menu.js?v=6"></script>
+  <script src="js/game.js?v=6"></script>
 
   <script>
     // Limpar SWs antigos e registrar novo
@@ -204,7 +204,7 @@
       navigator.serviceWorker.getRegistrations().then(regs => {
         regs.forEach(r => r.unregister());
       }).then(() => {
-        navigator.serviceWorker.register('/sw.js?v=4');
+        navigator.serviceWorker.register('/sw.js?v=6');
       }).catch(() => {});
 
       // Forçar reload se SW atualizou

@@ -14,6 +14,7 @@ const VoiceChat = (() => {
   let audioContext = null;
   let iceCandidateBuffer = {};
   let remoteDescSet = {};
+  let listenersRegistered = false;
 
   const ICE_SERVERS = [
     { urls: 'stun:stun.l.google.com:19302' },
@@ -115,9 +116,13 @@ const VoiceChat = (() => {
     syncGlobals();
     updateVoiceUI();
 
-    chatChannel.on('broadcast', { event: 'voice-signal' }, handleSignal);
-    chatChannel.on('presence', { event: 'sync' }, handlePresenceSync);
-    chatChannel.on('presence', { event: 'leave' }, handlePresenceLeave);
+    // Registrar listeners apenas uma vez para não acumular
+    if (!listenersRegistered) {
+      chatChannel.on('broadcast', { event: 'voice-signal' }, handleSignal);
+      chatChannel.on('presence', { event: 'sync' }, handlePresenceSync);
+      chatChannel.on('presence', { event: 'leave' }, handlePresenceLeave);
+      listenersRegistered = true;
+    }
 
     await ChatSystem.updatePresence();
 
@@ -393,6 +398,7 @@ const VoiceChat = (() => {
     connectedPeers.clear();
     pendingOffers.clear();
     chatChannel = null;
+    // NÃO resetar listenersRegistered — o canal é o mesmo
     syncGlobals();
     ChatSystem.updatePresence();
     updateVoiceUI();

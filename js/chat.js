@@ -221,18 +221,31 @@ const ChatSystem = (() => {
     if (!channel) return;
     const state = channel.presenceState();
     const players = [];
+    let foundSelf = false;
     for (const key of Object.keys(state)) {
       for (const entry of state[key]) {
         if (entry.username) {
+          const isMe = entry.presenceKey === presenceKey;
+          if (isMe) foundSelf = true;
           players.push({
             username: entry.username,
             voiceActive: !!entry.voiceActive,
             voiceMuted: !!entry.voiceMuted,
             voicePeerId: entry.voicePeerId || null,
-            isMe: entry.presenceKey === presenceKey
+            isMe
           });
         }
       }
+    }
+    // Garante que o jogador local SEMPRE aparece na lista
+    if (!foundSelf && username) {
+      players.unshift({
+        username: username,
+        voiceActive: !!window._voiceActive,
+        voiceMuted: !!window._voiceMuted,
+        voicePeerId: window._voicePeerId || null,
+        isMe: true
+      });
     }
     onlinePlayers = players;
     renderOnlineList();
