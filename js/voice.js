@@ -1,18 +1,20 @@
-// VoiceChat - Sistema de bate-papo de voz via WebRTC + Supabase Realtime
-// Sala única para todos os jogadores logados
-// Usa Supabase Presence para descobrir peers (garante sincronização)
-// e broadcast para sinalização WebRTC (offer/answer/ICE)
+// VoiceChat - Chat de voz via WebRTC
+// Reutiliza o canal Supabase Realtime do ChatSystem (mesmo canal = mesma sala)
+// Sinalização WebRTC via broadcast no canal do chat
+// Descoberta de peers via Presence do canal do chat
 
 const VoiceChat = (() => {
-  let supabase = null;
-  let channel = null;
   let localStream = null;
   let peers = {};          // peerId -> RTCPeerConnection
   let isActive = false;
   let isMuted = false;
   let myPeerId = '';
   let connectedPeers = new Set();
-  let pendingOffers = new Set(); // evita ofertas duplicadas
+  let pendingOffers = new Set();
+  let signalHandler = null;
+  let presenceSyncHandler = null;
+  let presenceLeaveHandler = null;
+  let chatChannel = null;
 
   const ICE_SERVERS = [
     { urls: 'stun:stun.l.google.com:19302' },
@@ -20,60 +22,42 @@ const VoiceChat = (() => {
   ];
 
   function generatePeerId() {
-    return 'peer_' + Math.random().toString(36).substring(2, 10) + '_' + Date.now();
+    return 'v_' + Math.random().toString(36).substring(2, 10) + '_' + Date.now();
   }
 
-  async function init() {
-    const SUPABASE_URL = window.SUPABASE_URL || '';
-    const SUPABASE_KEY = window.SUPABASE_KEY || '';
-
-    if (!SUPABASE_URL || !SUPABASE_KEY) {
-      updateVoiceStatus('offline', 'Configure Supabase para voz');
-      return false;
-    }
-
-    myPeerId = generatePeerId();
-
-    try {
-      if (!window.supabase) {
-        await loadScript('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js');
-      }
-      supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-      return true;
-    } catch {
-      updateVoiceStatus('offline', 'Erro ao conectar');
-      return false;
-    }
+  function getChannel() {
+    return ChatSystem.channel;
   }
 
-  function loadScript(src) {
-    return new Promise((resolve, reject) => {
-      if (document.querySelector(`script[src="${src}"]`)) { resolve(); return; }
-      const s = document.createElement('script');
-      s.src = src;
-      s.onload = resolve;
-      s.onerror = reject;
-      document.head.appendChild(s);
+  // Aguarda o canal do chat ficar disponível (até 10s)
+  function waitForChannel() {
+    return new Promise((resolve) => {
+      if (getChannel()) return resolve(getChannel());
+      let tries = 0;
+      const interval = setInterval(() => {
+        tries++;
+        if (getChannel()) { clearInterval(interval); resolve(getChannel()); }
+        else if (tries > 40) { clearInterval(interval); resolve(null); }
+      }, 250);
     });
   }
 
-  // Retorna todos os peerIds presentes no canal (exceto o próprio)
-  function getPresencePeerIds() {
-    if (!channel) return [];
-    const state = channel.presenceState();
+  // Retorna todos os peerIds de voz presentes no canal
+  function getVoicePeerIds() {
+    const ch = getChannel();
+    if (!ch) return [];
+    const state = ch.presenceState();
     const ids = [];
     for (const key of Object.keys(state)) {
       for (const entry of state[key]) {
-        if (entry.peerId && entry.peerId !== myPeerId) {
-          ids.push(entry.peerId);
+        if (entry.voicePeerId && entry.voicePeerId !== myPeerId) {
+          ids.push(entry.voicePeerId);
         }
       }
     }
     return ids;
   }
 
-  // Decide quem inicia a oferta para evitar duplicação:
-  // o peer com ID lexicograficamente menor cria a offer
   function shouldInitiate(remotePeerId) {
     return myPeerId < remotePeerId;
   }
@@ -81,16 +65,19 @@ const VoiceChat = (() => {
   async function join() {
     if (isActive) return;
 
-    const ok = await init();
-    if (!ok) return;
+    updateVoiceStatus('connecting', 'Conectando...');
+
+    // Garante que o chat esteja inicializado
+    if (!ChatSystem.channel) { ChatSystem.init(); }
+    const ch = await waitForChannel();
+    if (!ch) {
+      updateVoiceStatus('offline', 'Chat não conectado — tente novamente');
+      return;
+    }
 
     try {
       localStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        },
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
         video: false
       });
     } catch (err) {
@@ -98,102 +85,89 @@ const VoiceChat = (() => {
       return;
     }
 
+    myPeerId = generatePeerId();
     isActive = true;
     isMuted = false;
+    chatChannel = ch;
     updateVoiceUI();
 
-    channel = supabase.channel('voice-room', {
-      config: { broadcast: { self: false }, presence: { key: myPeerId } }
-    });
+    // Escutar sinais WebRTC via broadcast no canal do chat
+    chatChannel.on('broadcast', { event: 'voice-signal' }, handleSignal);
 
-    // --- Sinalização WebRTC via Broadcast ---
-    channel.on('broadcast', { event: 'voice-signal' }, async (payload) => {
-      const data = payload.payload;
-      if (!data || data.target !== myPeerId) return;
+    // Escutar Presence sync para detectar peers de voz
+    chatChannel.on('presence', { event: 'sync' }, handlePresenceSync);
+    chatChannel.on('presence', { event: 'leave' }, handlePresenceLeave);
 
-      try {
-        switch (data.type) {
-          case 'offer':
-            await handleOffer(data.from, data.sdp);
-            break;
-          case 'answer':
-            await handleAnswer(data.from, data.sdp);
-            break;
-          case 'ice-candidate':
-            await handleIceCandidate(data.from, data.candidate);
-            break;
-        }
-      } catch (e) {
-        console.warn('[Voice] Sinal ignorado:', e);
+    // Atualizar presença com voicePeerId (o chat já rastreia presença, fazemos re-track)
+    await chatChannel.track({ voicePeerId: myPeerId });
+
+    updateVoiceStatus('connected', 'Na sala de voz');
+    console.log('[Voice] Entrou na sala, peerId:', myPeerId);
+  }
+
+  async function handleSignal(payload) {
+    const data = payload.payload;
+    if (!data || data.target !== myPeerId) return;
+
+    try {
+      switch (data.type) {
+        case 'offer':
+          await handleOffer(data.from, data.sdp);
+          break;
+        case 'answer':
+          await handleAnswer(data.from, data.sdp);
+          break;
+        case 'ice-candidate':
+          await handleIceCandidate(data.from, data.candidate);
+          break;
       }
-    });
+    } catch (e) {
+      console.warn('[Voice] Sinal ignorado:', e);
+    }
+  }
 
-    // --- Presence: sincroniza quem está na sala ---
-    channel.on('presence', { event: 'sync' }, () => {
-      // sync é chamado sempre que o estado de presença muda.
-      // Conectar a todos os peers que ainda não estamos conectados.
-      const remotePeers = getPresencePeerIds();
-      for (const rId of remotePeers) {
-        if (!peers[rId] && !pendingOffers.has(rId) && shouldInitiate(rId)) {
-          pendingOffers.add(rId);
-          createOffer(rId);
-        }
+  function handlePresenceSync() {
+    if (!isActive) return;
+    const remotePeers = getVoicePeerIds();
+    for (const rId of remotePeers) {
+      if (!peers[rId] && !pendingOffers.has(rId) && shouldInitiate(rId)) {
+        pendingOffers.add(rId);
+        createOffer(rId);
       }
-      updatePeerCount();
-    });
+    }
+    updatePeerCount();
+  }
 
-    channel.on('presence', { event: 'leave' }, ({ leftPresences }) => {
-      for (const p of leftPresences) {
-        if (p.peerId && peers[p.peerId]) {
-          removePeer(p.peerId);
-        }
+  function handlePresenceLeave({ leftPresences }) {
+    for (const p of leftPresences) {
+      if (p.voicePeerId && peers[p.voicePeerId]) {
+        removePeer(p.voicePeerId);
       }
-    });
-
-    // Aguardar confirmação real da inscrição antes de rastrear presença
-    channel.subscribe(async (status) => {
-      if (status === 'SUBSCRIBED') {
-        // Registrar presença — todos os inscritos receberão sync
-        await channel.track({ peerId: myPeerId });
-        updateVoiceStatus('connected', 'Na sala de voz');
-      }
-    });
+    }
   }
 
   async function createOffer(remotePeerId) {
     const pc = createPeerConnection(remotePeerId);
-
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
 
-    channel.send({
+    chatChannel.send({
       type: 'broadcast',
       event: 'voice-signal',
-      payload: {
-        type: 'offer',
-        from: myPeerId,
-        target: remotePeerId,
-        sdp: pc.localDescription
-      }
+      payload: { type: 'offer', from: myPeerId, target: remotePeerId, sdp: pc.localDescription }
     });
   }
 
   async function handleOffer(remotePeerId, sdp) {
     const pc = createPeerConnection(remotePeerId);
-
     await pc.setRemoteDescription(new RTCSessionDescription(sdp));
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
 
-    channel.send({
+    chatChannel.send({
       type: 'broadcast',
       event: 'voice-signal',
-      payload: {
-        type: 'answer',
-        from: myPeerId,
-        target: remotePeerId,
-        sdp: pc.localDescription
-      }
+      payload: { type: 'answer', from: myPeerId, target: remotePeerId, sdp: pc.localDescription }
     });
   }
 
@@ -217,42 +191,34 @@ const VoiceChat = (() => {
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
     peers[remotePeerId] = pc;
 
-    // Adicionar stream local
     if (localStream) {
-      localStream.getTracks().forEach(track => {
-        pc.addTrack(track, localStream);
-      });
+      localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
     }
 
-    // ICE Candidates
     pc.onicecandidate = (event) => {
-      if (event.candidate && channel) {
-        channel.send({
+      if (event.candidate && chatChannel) {
+        chatChannel.send({
           type: 'broadcast',
           event: 'voice-signal',
-          payload: {
-            type: 'ice-candidate',
-            from: myPeerId,
-            target: remotePeerId,
-            candidate: event.candidate
-          }
+          payload: { type: 'ice-candidate', from: myPeerId, target: remotePeerId, candidate: event.candidate }
         });
       }
     };
 
-    // Receber áudio remoto
     pc.ontrack = (event) => {
+      const audioId = 'voice-audio-' + remotePeerId;
+      const old = document.getElementById(audioId);
+      if (old) old.remove();
+
       const audio = new Audio();
       audio.srcObject = event.streams[0];
+      audio.id = audioId;
       audio.play().catch(() => {});
-      audio.id = 'voice-audio-' + remotePeerId;
-      // Remover se já existia
-      const old = document.getElementById(audio.id);
-      if (old) old.remove();
       document.body.appendChild(audio);
 
       connectedPeers.add(remotePeerId);
       updatePeerCount();
+      console.log('[Voice] Áudio conectado com', remotePeerId);
     };
 
     pc.onconnectionstatechange = () => {
@@ -279,14 +245,12 @@ const VoiceChat = (() => {
   function leave() {
     if (!isActive) return;
 
-    // Remover presença e canal
-    if (channel) {
-      channel.untrack();
-      supabase.removeChannel(channel);
-      channel = null;
+    // Remover voicePeerId da presença (re-track sem ele)
+    if (chatChannel) {
+      chatChannel.track({});
     }
 
-    // Fechar todas as conexões
+    // Fechar todas as conexões WebRTC
     Object.keys(peers).forEach(removePeer);
 
     // Parar microfone
@@ -299,6 +263,7 @@ const VoiceChat = (() => {
     isMuted = false;
     connectedPeers.clear();
     pendingOffers.clear();
+    chatChannel = null;
     updateVoiceUI();
     updateVoiceStatus('offline', 'Desconectado da voz');
   }
@@ -306,18 +271,12 @@ const VoiceChat = (() => {
   function toggleMute() {
     if (!isActive || !localStream) return;
     isMuted = !isMuted;
-    localStream.getAudioTracks().forEach(track => {
-      track.enabled = !isMuted;
-    });
+    localStream.getAudioTracks().forEach(track => { track.enabled = !isMuted; });
     updateVoiceUI();
   }
 
   function toggle() {
-    if (isActive) {
-      leave();
-    } else {
-      join();
-    }
+    if (isActive) { leave(); } else { join(); }
   }
 
   // ===== UI Helpers =====

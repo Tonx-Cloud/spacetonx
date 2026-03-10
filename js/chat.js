@@ -64,9 +64,9 @@ const ChatSystem = (() => {
 
       supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-      // Criar canal de chat
+      // Criar canal de chat com Presence habilitado
       channel = supabase.channel('space-shooter-chat', {
-        config: { broadcast: { self: true } }
+        config: { broadcast: { self: true }, presence: { key: 'user_' + Math.random().toString(36).substring(2, 8) } }
       });
 
       channel.on('broadcast', { event: 'message' }, (payload) => {
@@ -204,7 +204,9 @@ const ChatSystem = (() => {
     sendMessage,
     toggle,
     notifyGameEvent,
-    get username() { return username; }
+    get username() { return username; },
+    get supabase() { return supabase; },
+    get channel() { return channel; }
   };
 })();
 
